@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="مختبر الشفاء" />
+<title>مختبر الشفاء — نظام إدارة المختبر</title>
+
+<!-- Tailwind (بدون خطوة بناء — مناسب لأداة داخلية صغيرة) -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- React + Babel (بدون خطوة بناء) -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<!-- Supabase client -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
+<style>
+  @media print {
+    .no-print { display: none !important; }
+    body * { visibility: hidden; }
+    #report-area, #report-area * { visibility: visible; }
+    #report-area { position: absolute; top: 0; right: 0; left: 0; width: 100%; border: none !important; }
+  }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Tahoma, Arial, sans-serif; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+
+// =============================================================================
+// ⚠️ إعداد الاتصال — الصقّ هنا بيانات مشروعك من Supabase (Project Settings > API)
+// =============================================================================
+const SUPABASE_URL = "ضع_رابط_مشروعك_هنا";
+const SUPABASE_ANON_KEY = "ضع_المفتاح_العام_anon_key_هنا";
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ---------------------------------------------------------------------------
+// Design tokens
+// ---------------------------------------------------------------------------
+const C = {
+  bg: '#F5F6F2', surface: '#FFFFFF', ink: '#1C2622', inkMuted: '#5B665F', inkFaint: '#8A948C',
+  line: '#E1E4DD', accent: '#2B6472', accentDark: '#1E4B56', accentSoft: '#E4EEEF',
+  normal: '#3F7A52', normalSoft: '#E6F0E7', warning: '#B8842C', warningSoft: '#F5EBD8',
+  critical: '#B3402A', criticalSoft: '#F5E2DD', criticalDeep: '#7A1F12', criticalDeepSoft: '#EFC9BC',
+  muted: '#ECECE8',
+};
+
+const SAR = (n) => `${Number(n || 0).toLocaleString('ar-EG-u-nu-latn')} ر.س`;
+const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('ar-EG-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
+const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString('ar-EG-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+const PHONE_RE = /^[\d\s+()-]{7,}$/;
+const inputStyle = { border: `1px solid ${C.line}` };
+
+function resolveTestRanges(test, patient) {
+  const useFemale = patient && patient.gender === 'أنثى' && test.min_female !== null && test.min_female !== undefined;
+  const min = useFemale ? test.min_female : test.min;
+  const max = useFemale ? test.max_female : test.max;
+  const span = (test.max - test.min) || 1;
+  const critLow = (test.critical_low !== null && test.critical_low !== undefined) ? test.critical_low : min - span * 0.5;
+  const critHigh = (test.critical_high !== null && test.critical_high !== undefined) ? test.critical_high : max + span * 0.5;
+  return { min, max, critLow, critHigh };
+}
+function classifyValue(value, r) {
+  if (value === '' || value === undefined || value === null || isNaN(value)) return null;
+  if (value < r.critLow || value > r.critHigh) return 'critical';
+  if (value < r.min || value > r.max) return 'abnormal';
+  return 'normal';
+}
+function invoicePaid(inv) { return (inv.payments || []).reduce((s, p) => s + Number(p.amount), 0); }
+function invoiceStatus(inv) {
+  if (inv.voided) return 'voided';
+  const paid = invoicePaid(inv);
+  if (paid <= 0) return 'unpaid';
+  if (paid < inv.amount) return 'partial';
+  return 'paid';
+}
+
+// ---------------------------------------------------------------------------
+// Shared UI pieces
+// ---------------------------------------------------------------------------
+function RangeGauge({ value, min, max, critLow, critHigh }) {
+  const range = max - min || 1;
+  const pad = range * 0.35;
+  const lo = min - pad, hi = max + pad;
+  const clamp = (n) => Math.min(100, Math.max(0, n));
+  const toPct = (v) => clamp(((v - lo) / (hi - lo)) * 100);
+  const outOfRange = value < min || value > max;
+  const isCritical = critLow !== undefined && critHigh !== undefined && (value < critLow || value > critHigh);
+  const dotColor = isCritical ? C.criticalDeep : outOfRange ? C.critical : C.normal;
+  return (
+    <div className="w-full" style={{ minWidth: 90 }}>
+      <div className="relative h-1.5 rounded-full" style={{ background: '#E4E7E1' }}>
+        <div className="absolute h-1.5 rounded-full" style={{ left: `${toPct(min)}%`, width: `${Math.max(0, toPct(max) - toPct(min))}%`, background: '#BFD8C6' }} />
+        <div className="absolute rounded-full" style={{ left: `${toPct(value)}%`, top: '50%', width: 10, height: 10, background: dotColor, border: '2px solid #fff', transform: 'translate(-50%,-50%)', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+      </div>
+    </div>
+  );
+}
+function Flag({ value, min, max, critLow, critHigh }) {
+  if (value === '' || value === undefined || value === null || isNaN(value)) return null;
+  const isCritical = critLow !== undefined && critHigh !== undefined && (value < critLow || value > critHigh);
+  const isLow = value < min, isHigh = value > max;
+  if (isCritical) return <span className="inline-flex items-center gap-1 text-xs font-bold px-1.5 py-0.5 rounded" style={{ color: '#fff', background: C.criticalDeep }}>⚠ حرج {isLow ? '(منخفض جداً)' : '(مرتفع جداً)'}</span>;
+  if (isLow) return <span className="text-xs font-bold" style={{ color: C.critical }}>منخفض</span>;
+  if (isHigh) return <span className="text-xs font-bold" style={{ color: C.critical }}>مرتفع</span>;
+  return <span className="text-xs font-bold" style={{ color: C.normal }}>طبيعي</span>;
+}
+function StatCard({ label, value, tone }) {
+  const toneColor = tone === 'critical' ? C.critical : tone === 'warning' ? C.warning : C.accent;
+  return (
+    <div className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+      <div className="text-xs" style={{ color: C.inkMuted }}>{label}</div>
+      <div className="text-xl font-bold font-mono mt-1" style={{ color: toneColor }}>{value}</div>
+    </div>
+  );
+}
+function Badge({ tone, children }) {
+  const map = { normal: [C.normalSoft, C.normal], warning: [C.warningSoft, C.warning], critical: [C.criticalSoft, C.critical], accent: [C.accentSoft, C.accent], muted: [C.muted, C.inkMuted] };
+  const [bg, fg] = map[tone] || map.accent;
+  return <span className="px-2 py-0.5 rounded-full text-xs font-bold whitespace-nowrap" style={{ background: bg, color: fg }}>{children}</span>;
+}
+function EmptyState({ text }) {
+  return <div className="flex flex-col items-center justify-center py-10 text-center text-sm" style={{ color: C.inkFaint }}>{text}</div>;
+}
+function Field({ label, children }) {
+  return <div><div className="text-xs font-bold mb-1" style={{ color: C.inkMuted }}>{label}</div>{children}</div>;
+}
+function ErrorNote({ children }) {
+  if (!children) return null;
+  return <div className="text-xs font-bold px-3 py-2 rounded-md" style={{ background: C.criticalSoft, color: C.critical }}>{children}</div>;
+}
+function ConfirmDialog({ state, onCancel }) {
+  if (!state || !state.open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(28,38,34,0.45)' }}>
+      <div className="w-full max-w-sm rounded-lg p-5" style={{ background: C.surface }}>
+        <div className="font-bold text-base mb-2" style={{ color: C.ink }}>{state.title}</div>
+        <div className="text-sm mb-5" style={{ color: C.inkMuted }}>{state.message}</div>
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ color: C.inkMuted, border: `1px solid ${C.line}` }}>إلغاء</button>
+          <button onClick={() => { state.onConfirm(); onCancel(); }} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ background: state.danger ? C.critical : C.accent, color: '#fff' }}>{state.confirmLabel || 'تأكيد'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+function usePagination(items, perPage, resetKey) {
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [resetKey]);
+  const totalPages = Math.max(1, Math.ceil(items.length / perPage));
+  const clamped = Math.min(page, totalPages);
+  const start = (clamped - 1) * perPage;
+  return { page: clamped, setPage, totalPages, pageItems: items.slice(start, start + perPage) };
+}
+function PaginationBar({ page, totalPages, setPage }) {
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-between px-4 py-3" style={{ borderTop: `1px solid ${C.line}` }}>
+      <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="text-xs font-bold" style={{ color: C.accent, opacity: page <= 1 ? 0.35 : 1 }}>‹ السابق</button>
+      <div className="text-xs font-mono" style={{ color: C.inkMuted }}>صفحة {page} من {totalPages}</div>
+      <button disabled={page >= totalPages} onClick={() => setPage(page + 1)} className="text-xs font-bold" style={{ color: C.accent, opacity: page >= totalPages ? 0.35 : 1 }}>التالي ›</button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Login
+// ---------------------------------------------------------------------------
+function LoginScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [resetMsg, setResetMsg] = useState('');
+
+  const submit = async () => {
+    setError(''); setBusy(true);
+    const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
+    setBusy(false);
+    if (error) setError('بيانات الدخول غير صحيحة، أو الحساب غير موجود بعد');
+  };
+
+  const forgot = async () => {
+    if (!email.trim()) { setError('أدخل بريدك الإلكتروني أولاً'); return; }
+    const { error } = await sb.auth.resetPasswordForEmail(email.trim());
+    setResetMsg(error ? 'تعذر الإرسال — تأكد من البريد' : 'تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك');
+  };
+
+  return (
+    <div dir="rtl" lang="ar" className="h-screen w-full flex items-center justify-center p-4" style={{ background: C.bg }}>
+      <div className="w-full max-w-sm rounded-lg p-6" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <div className="text-xl font-bold mb-1" style={{ color: C.ink }}>مختبر الشفاء</div>
+        <div className="text-sm mb-5" style={{ color: C.inkMuted }}>تسجيل الدخول لنظام إدارة المختبر</div>
+        <div className="space-y-3">
+          <Field label="البريد الإلكتروني">
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} />
+          </Field>
+          <Field label="كلمة المرور">
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} />
+          </Field>
+          <ErrorNote>{error}</ErrorNote>
+          {resetMsg && <div className="text-xs" style={{ color: C.inkMuted }}>{resetMsg}</div>}
+          <button onClick={submit} disabled={busy} className="w-full px-4 py-2.5 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff', opacity: busy ? 0.6 : 1 }}>{busy ? '...جارِ الدخول' : 'دخول'}</button>
+          <button onClick={forgot} className="w-full text-xs font-bold" style={{ color: C.accent }}>نسيت كلمة المرور؟</button>
+        </div>
+        <div className="text-xs mt-5 pt-4" style={{ color: C.inkFaint, borderTop: `1px solid ${C.line}` }}>
+          الحسابات تُنشأ من قِبل مسؤول المختبر عبر لوحة Supabase. تواصل معه إن لم يكن لديك حساب بعد.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar
+// ---------------------------------------------------------------------------
+const NAV = [
+  { key: 'dashboard', label: 'لوحة التحكم' },
+  { key: 'patients', label: 'المرضى' },
+  { key: 'orders', label: 'الطلبات والعينات' },
+  { key: 'inventory', label: 'المخزون' },
+  { key: 'billing', label: 'الفواتير' },
+  { key: 'audit', label: 'سجل التدقيق' },
+  { key: 'settings', label: 'الفحوصات والإعدادات' },
+];
+
+function Sidebar({ view, setView, displayName, onLogout, onExport, saveError }) {
+  return (
+    <div className="w-56 shrink-0 h-full flex flex-col" style={{ background: C.surface, borderLeft: `1px solid ${C.line}` }}>
+      <div className="px-5 py-5" style={{ borderBottom: `1px solid ${C.line}` }}>
+        <div className="text-lg font-bold" style={{ color: C.ink }}>مختبر الشفاء</div>
+        <div className="text-xs" style={{ color: C.inkMuted }}>نظام إدارة المختبر</div>
+      </div>
+      <nav className="flex-1 py-3 px-2 space-y-1 overflow-y-auto">
+        {NAV.map((item) => {
+          const active = view === item.key;
+          return (
+            <button key={item.key} onClick={() => setView(item.key)} className="w-full text-right px-3 py-2.5 rounded-lg text-sm" style={{ background: active ? C.accentSoft : 'transparent', color: active ? C.accentDark : C.inkMuted, fontWeight: active ? 700 : 500 }}>
+              {item.label}
+            </button>
+          );
+        })}
+      </nav>
+      <div className="px-4 py-3 space-y-2" style={{ borderTop: `1px solid ${C.line}` }}>
+        <div className="text-xs" style={{ color: C.inkMuted }}>مسجّل الدخول: <span className="font-bold" style={{ color: C.ink }}>{displayName}</span></div>
+        <button onClick={onExport} className="w-full text-xs font-bold px-2 py-1.5 rounded-md" style={{ border: `1px solid ${C.line}`, color: C.accent }}>تصدير نسخة احتياطية</button>
+        <button onClick={onLogout} className="w-full text-xs font-bold px-2 py-1.5 rounded-md" style={{ border: `1px solid ${C.line}`, color: C.critical }}>تسجيل الخروج</button>
+      </div>
+      {saveError && <div className="px-4 py-2 text-xs" style={{ color: C.critical }}>تعذر الاتصال بالخادم — تحقق من الإنترنت</div>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------
+function Dashboard({ data, setView, setActiveOrderId }) {
+  const { patients, catalog, orders, invoices, inventory, auditLog } = data;
+  const pendingOrders = orders.filter((o) => o.status === 'pending');
+  const collected = invoices.reduce((s, i) => s + invoicePaid(i), 0);
+  const lowStock = inventory.filter((i) => i.quantity <= i.threshold);
+
+  const flagged = [];
+  orders.filter((o) => o.status === 'completed').forEach((o) => {
+    const patient = patients.find((p) => p.id === o.patient_id);
+    Object.entries(o.results || {}).forEach(([testId, value]) => {
+      const test = catalog.find((c) => c.id === testId);
+      if (!test) return;
+      const r = resolveTestRanges(test, patient);
+      const status = classifyValue(value, r);
+      if (status === 'abnormal' || status === 'critical') flagged.push({ patient: patient?.name, test, value, r, critical: status === 'critical' });
+    });
+  });
+  const criticalCount = flagged.filter((f) => f.critical).length;
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="text-2xl font-bold" style={{ color: C.ink }}>لوحة التحكم</div>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <StatCard label="إجمالي المرضى" value={patients.length} />
+        <StatCard label="عينات قيد الانتظار" value={pendingOrders.length} tone={pendingOrders.length ? 'warning' : undefined} />
+        <StatCard label="إيرادات محصّلة" value={SAR(collected)} />
+        <StatCard label="تنبيهات المخزون" value={lowStock.length} tone={lowStock.length ? 'critical' : undefined} />
+        <StatCard label="نتائج حرجة" value={criticalCount} tone={criticalCount ? 'critical' : undefined} />
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="font-bold mb-3" style={{ color: C.ink }}>نتائج خارج المعدل الطبيعي</div>
+          {flagged.length === 0 ? <EmptyState text="لا توجد نتائج غير طبيعية حالياً" /> : (
+            <div className="space-y-3">
+              {flagged.slice(0, 5).map((a, idx) => (
+                <div key={idx} className="flex items-center justify-between gap-3 pb-2" style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <div className="min-w-0"><div className="text-sm font-bold truncate" style={{ color: C.ink }}>{a.patient}</div><div className="text-xs truncate" style={{ color: C.inkMuted }}>{a.test.name}</div></div>
+                  <Flag value={a.value} min={a.r.min} max={a.r.max} critLow={a.r.critLow} critHigh={a.r.critHigh} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="font-bold mb-3" style={{ color: C.ink }}>تنبيهات المخزون</div>
+          {lowStock.length === 0 ? <EmptyState text="المخزون في مستويات جيدة" /> : (
+            <div className="space-y-3">
+              {lowStock.map((item) => (
+                <div key={item.id} className="flex items-center justify-between">
+                  <div className="text-sm font-bold" style={{ color: C.ink }}>{item.name}</div>
+                  <div className="text-xs font-mono" style={{ color: C.critical }}>{item.quantity} / {item.threshold} {item.unit}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="font-bold" style={{ color: C.ink }}>عينات قيد الانتظار</div>
+            <button onClick={() => setView('orders')} className="text-sm font-bold" style={{ color: C.accent }}>عرض الكل ‹</button>
+          </div>
+          {pendingOrders.length === 0 ? <EmptyState text="لا توجد عينات قيد الانتظار" /> : (
+            <div className="space-y-2">
+              {pendingOrders.slice(0, 5).map((o) => {
+                const patient = patients.find((p) => p.id === o.patient_id);
+                return (
+                  <div key={o.id} className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <div><div className="text-sm font-bold" style={{ color: C.ink }}>{patient?.name}</div><div className="text-xs font-mono" style={{ color: C.inkMuted }}>{o.sample_id}</div></div>
+                    <button onClick={() => { setActiveOrderId(o.id); setView('results'); }} className="text-sm font-bold px-3 py-1.5 rounded-md" style={{ background: C.accent, color: '#fff' }}>إدخال النتائج</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="font-bold" style={{ color: C.ink }}>آخر نشاط</div>
+            <button onClick={() => setView('audit')} className="text-sm font-bold" style={{ color: C.accent }}>السجل الكامل ‹</button>
+          </div>
+          {auditLog.length === 0 ? <EmptyState text="لا يوجد نشاط بعد" /> : (
+            <div className="space-y-2">
+              {auditLog.slice(0, 5).map((a) => (
+                <div key={a.id} className="pb-2" style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <div className="text-sm font-bold" style={{ color: C.ink }}>{a.action}</div>
+                  <div className="text-xs truncate" style={{ color: C.inkMuted }}>{a.details}</div>
+                  <div className="text-xs font-mono" style={{ color: C.inkFaint }}>{fmtDateTime(a.created_at)} · {a.user_name}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Patients
+// ---------------------------------------------------------------------------
+function PatientsView({ patients, orders, actions, askConfirm, onViewOrders }) {
+  const [showForm, setShowForm] = useState(false);
+  const [query, setQuery] = useState('');
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState({ name: '', age: '', gender: 'ذكر', phone: '' });
+  const [error, setError] = useState('');
+
+  const filtered = patients.filter((p) => p.name.includes(query) || (p.phone || '').includes(query));
+  const { page, setPage, totalPages, pageItems } = usePagination(filtered, 6, query);
+
+  const resetForm = () => { setForm({ name: '', age: '', gender: 'ذكر', phone: '' }); setEditingId(null); setShowForm(false); setError(''); };
+  const startEdit = (p) => { setEditingId(p.id); setForm({ name: p.name, age: String(p.age || ''), gender: p.gender || 'ذكر', phone: p.phone || '' }); setShowForm(true); setError(''); };
+
+  const submit = async () => {
+    if (!form.name.trim()) { setError('الاسم الكامل مطلوب'); return; }
+    if (!PHONE_RE.test(form.phone.trim())) { setError('رقم الهاتف غير صالح'); return; }
+    const age = Number(form.age);
+    if (!form.age || isNaN(age) || age < 0 || age > 120) { setError('العمر يجب أن يكون رقماً بين 0 و120'); return; }
+    const dup = patients.find((p) => p.id !== editingId && p.name.trim() === form.name.trim() && p.phone.trim() === form.phone.trim());
+    if (dup) { setError('يوجد مريض بنفس الاسم ورقم الهاتف'); return; }
+    setError('');
+    if (editingId) await actions.updatePatient(editingId, { name: form.name.trim(), age, gender: form.gender, phone: form.phone.trim() });
+    else await actions.addPatient({ name: form.name.trim(), age, gender: form.gender, phone: form.phone.trim() });
+    resetForm();
+  };
+
+  const onDelete = (p) => {
+    const count = orders.filter((o) => o.patient_id === p.id).length;
+    if (count > 0) { setError(`لا يمكن حذف "${p.name}" — لديه ${count} طلب مسجل`); return; }
+    askConfirm({ title: 'حذف مريض', message: `هل تريد حذف "${p.name}" نهائياً؟`, danger: true, onConfirm: () => actions.deletePatient(p.id, p.name) });
+  };
+
+  return (
+    <div className="p-6 space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="text-2xl font-bold" style={{ color: C.ink }}>المرضى <span className="text-sm font-normal" style={{ color: C.inkMuted }}>({patients.length})</span></div>
+        <button onClick={() => (showForm ? resetForm() : setShowForm(true))} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>+ مريض جديد</button>
+      </div>
+      {showForm && (
+        <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Field label="الاسم الكامل"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+            <Field label="العمر"><input type="number" value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+            <Field label="الجنس"><select value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}><option>ذكر</option><option>أنثى</option></select></Field>
+            <Field label="رقم الهاتف"><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+          </div>
+          <ErrorNote>{error}</ErrorNote>
+          <div className="flex gap-2">
+            <button onClick={submit} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>{editingId ? 'حفظ التعديلات' : 'حفظ المريض'}</button>
+            <button onClick={resetForm} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>إلغاء</button>
+          </div>
+        </div>
+      )}
+      {!showForm && <ErrorNote>{error}</ErrorNote>}
+      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="بحث بالاسم أو الهاتف..." className="w-full px-3 py-2.5 rounded-lg text-sm" style={{ ...inputStyle, background: C.surface }} />
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الاسم</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>العمر</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الجنس</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الهاتف</th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+            {pageItems.map((p) => (
+              <tr key={p.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{p.name}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: C.inkMuted }}>{p.age}</td>
+                <td className="px-4 py-3" style={{ color: C.inkMuted }}>{p.gender}</td>
+                <td className="px-4 py-3 font-mono whitespace-nowrap" style={{ color: C.inkMuted }}>{p.phone}</td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => onViewOrders(p.id)} className="text-xs font-bold" style={{ color: C.accent }}>الطلبات</button>
+                    <button onClick={() => startEdit(p)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>
+                    <button onClick={() => onDelete(p)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {pageItems.length === 0 && <tr><td colSpan={5}><EmptyState text="لا يوجد مرضى مطابقون" /></td></tr>}
+          </tbody>
+        </table>
+        <PaginationBar page={page} totalPages={totalPages} setPage={setPage} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+function OrdersView({ patients, catalog, orders, inventory, actions, setView, setActiveOrderId, filterPatientId, clearFilter, askConfirm }) {
+  const [tab, setTab] = useState('list');
+  const [selectedPatient, setSelectedPatient] = useState('');
+  const [selectedTests, setSelectedTests] = useState([]);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [busy, setBusy] = useState(false);
+
+  const total = catalog.filter((c) => selectedTests.includes(c.id)).reduce((s, c) => s + Number(c.price), 0);
+  const canSubmit = Boolean(selectedPatient) && selectedTests.length > 0 && !busy;
+  const toggleTest = (id) => setSelectedTests((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+
+  const lowStockWarnings = catalog.filter((c) => selectedTests.includes(c.id) && c.consumes_item_id)
+    .map((c) => inventory.find((i) => i.id === c.consumes_item_id)).filter((item) => item && item.quantity <= item.threshold);
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setBusy(true);
+    await actions.addOrder(selectedPatient, selectedTests);
+    setBusy(false);
+    setSelectedPatient(''); setSelectedTests([]); setTab('list');
+  };
+
+  let visible = filterPatientId ? orders.filter((o) => o.patient_id === filterPatientId) : orders;
+  if (statusFilter !== 'all') visible = visible.filter((o) => o.status === statusFilter);
+  if (query.trim()) {
+    const q = query.trim();
+    visible = visible.filter((o) => {
+      const patient = patients.find((p) => p.id === o.patient_id);
+      return (patient && patient.name.includes(q)) || (o.sample_id || '').includes(q);
+    });
+  }
+  const { page, setPage, totalPages, pageItems } = usePagination(visible, 6, query + statusFilter + filterPatientId);
+
+  const onCancel = (o) => askConfirm({ title: 'إلغاء الطلب', message: `هل تريد إلغاء الطلب ${o.sample_id}؟`, danger: true, confirmLabel: 'إلغاء الطلب', onConfirm: () => actions.cancelOrder(o.id, o.sample_id) });
+
+  return (
+    <div className="p-6 space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <div className="text-2xl font-bold" style={{ color: C.ink }}>الطلبات والعينات</div>
+          {filterPatientId && <button onClick={clearFilter} className="text-xs font-bold" style={{ color: C.accent }}>عرض طلبات مريض واحد — إلغاء ×</button>}
+        </div>
+        <div className="flex rounded-lg overflow-hidden" style={{ border: `1px solid ${C.line}` }}>
+          <button onClick={() => setTab('list')} className="px-4 py-2 text-sm font-bold" style={{ background: tab === 'list' ? C.accent : C.surface, color: tab === 'list' ? '#fff' : C.inkMuted }}>قائمة الطلبات</button>
+          <button onClick={() => setTab('new')} className="px-4 py-2 text-sm font-bold" style={{ background: tab === 'new' ? C.accent : C.surface, color: tab === 'new' ? '#fff' : C.inkMuted }}>طلب جديد</button>
+        </div>
+      </div>
+
+      {tab === 'new' ? (
+        <div className="rounded-lg p-5 space-y-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <Field label="المريض">
+            <select value={selectedPatient} onChange={(e) => setSelectedPatient(e.target.value)} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+              <option value="">اختر مريضاً...</option>
+              {patients.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </Field>
+          <div>
+            <div className="text-xs font-bold mb-2" style={{ color: C.inkMuted }}>الفحوصات المطلوبة</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {catalog.map((c) => {
+                const checked = selectedTests.includes(c.id);
+                return (
+                  <label key={c.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md cursor-pointer text-sm" style={{ background: checked ? C.accentSoft : C.bg, border: `1px solid ${checked ? C.accent : C.line}` }}>
+                    <span className="flex items-center gap-2"><input type="checkbox" checked={checked} onChange={() => toggleTest(c.id)} /><span style={{ color: C.ink }}>{c.name}</span></span>
+                    <span className="font-mono text-xs" style={{ color: C.inkMuted }}>{SAR(c.price)}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+          {lowStockWarnings.length > 0 && <ErrorNote>تنبيه مخزون: {lowStockWarnings.map((w) => w.name).join('، ')} منخفض حالياً</ErrorNote>}
+          <div className="flex items-center justify-between flex-wrap gap-3 pt-3" style={{ borderTop: `1px solid ${C.line}` }}>
+            <div className="text-sm" style={{ color: C.inkMuted }}>الإجمالي: <span className="font-mono font-bold text-base" style={{ color: C.ink }}>{SAR(total)}</span></div>
+            <button onClick={submit} className="px-4 py-2.5 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff', opacity: canSubmit ? 1 : 0.4 }}>{busy ? '...جارِ الحفظ' : 'تسجيل الطلب'}</button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-3">
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="بحث باسم المريض أو رقم العينة..." className="flex-1 min-w-[200px] px-3 py-2.5 rounded-lg text-sm" style={{ ...inputStyle, background: C.surface }} />
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2.5 rounded-lg text-sm" style={{ ...inputStyle, background: C.surface }}>
+              <option value="all">كل الحالات</option><option value="pending">قيد الانتظار</option><option value="completed">مكتمل</option><option value="cancelled">ملغى</option>
+            </select>
+          </div>
+          <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+            <table className="w-full text-sm">
+              <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+                <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>رقم العينة</th>
+                <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المريض</th>
+                <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>التاريخ</th>
+                <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الحالة</th>
+                <th></th>
+              </tr></thead>
+              <tbody>
+                {pageItems.map((o) => {
+                  const patient = patients.find((p) => p.id === o.patient_id);
+                  return (
+                    <tr key={o.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                      <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{o.sample_id}</td>
+                      <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{patient?.name}</td>
+                      <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{fmtDate(o.created_at)}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {o.status === 'pending' && <Badge tone="warning">قيد الانتظار</Badge>}
+                        {o.status === 'completed' && <Badge tone={o.has_critical ? 'critical' : 'normal'}>{o.has_critical ? 'مكتمل — حرج' : 'مكتمل'}</Badge>}
+                        {o.status === 'cancelled' && <Badge tone="muted">ملغى</Badge>}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="flex items-center gap-3">
+                          {o.status === 'pending' && <><button onClick={() => { setActiveOrderId(o.id); setView('results'); }} className="text-xs font-bold" style={{ color: C.accent }}>إدخال النتائج</button><button onClick={() => onCancel(o)} className="text-xs font-bold" style={{ color: C.critical }}>إلغاء</button></>}
+                          {o.status === 'completed' && <button onClick={() => { setActiveOrderId(o.id); setView('report'); }} className="text-xs font-bold" style={{ color: C.accent }}>التقرير</button>}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {pageItems.length === 0 && <tr><td colSpan={5}><EmptyState text="لا توجد طلبات مطابقة" /></td></tr>}
+              </tbody>
+            </table>
+            <PaginationBar page={page} totalPages={totalPages} setPage={setPage} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Results entry
+// ---------------------------------------------------------------------------
+function ResultsEntryView({ order, patient, catalog, actions, setView }) {
+  const [values, setValues] = useState(() => order ? Object.fromEntries(order.test_ids.map((id) => [id, ''])) : {});
+  const [busy, setBusy] = useState(false);
+  if (!order) return <div className="p-6"><EmptyState text="لم يتم تحديد طلب" /></div>;
+
+  const tests = order.test_ids.map((id) => catalog.find((c) => c.id === id)).filter(Boolean);
+  const allFilled = tests.every((t) => values[t.id] !== '' && !isNaN(Number(values[t.id])) && Number(values[t.id]) >= 0);
+  const anyCritical = tests.some((t) => {
+    const v = values[t.id];
+    if (v === '' || isNaN(Number(v))) return false;
+    return classifyValue(Number(v), resolveTestRanges(t, patient)) === 'critical';
+  });
+
+  const save = async () => {
+    if (!allFilled) return;
+    setBusy(true);
+    const numeric = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, Number(v)]));
+    await actions.completeOrder(order.id, numeric, anyCritical, order.sample_id);
+    setBusy(false);
+    setView('report');
+  };
+
+  return (
+    <div className="p-6 space-y-5">
+      <button onClick={() => setView('orders')} className="text-sm font-bold" style={{ color: C.accent }}>‹ رجوع للطلبات</button>
+      <div>
+        <div className="text-2xl font-bold" style={{ color: C.ink }}>إدخال النتائج</div>
+        <div className="text-sm font-mono" style={{ color: C.inkMuted }}>{patient?.name} · {order.sample_id}</div>
+      </div>
+      {anyCritical && <div className="px-4 py-3 rounded-lg text-sm font-bold" style={{ background: C.criticalDeepSoft, color: C.criticalDeep }}>⚠ توجد قيمة حرجة ضمن هذه النتائج — يُرجى التأكد منها قبل الحفظ</div>}
+      <div className="rounded-lg" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        {tests.map((t, idx) => {
+          const v = values[t.id]; const num = Number(v); const showGauge = v !== '' && !isNaN(num);
+          const r = resolveTestRanges(t, patient);
+          return (
+            <div key={t.id} className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3 items-center" style={{ borderBottom: idx < tests.length - 1 ? `1px solid ${C.line}` : 'none' }}>
+              <div className="col-span-2 md:col-span-1"><div className="font-bold text-sm" style={{ color: C.ink }}>{t.name}</div><div className="text-xs font-mono" style={{ color: C.inkMuted }}>المعدل: {r.min}–{r.max} {t.unit}</div></div>
+              <input type="number" step="any" min="0" value={v} onChange={(e) => setValues({ ...values, [t.id]: e.target.value })} placeholder="القيمة" className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} />
+              <div>{showGauge && <RangeGauge value={num} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} />}</div>
+              <div>{showGauge && <Flag value={num} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} />}</div>
+            </div>
+          );
+        })}
+      </div>
+      <button onClick={save} disabled={!allFilled || busy} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff', opacity: allFilled && !busy ? 1 : 0.4 }}>{busy ? '...جارِ الحفظ' : 'حفظ النتائج وإكمال الطلب'}</button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Report
+// ---------------------------------------------------------------------------
+function ReportView({ order, patient, catalog, setView }) {
+  if (!order) return <div className="p-6"><EmptyState text="لم يتم تحديد طلب" /></div>;
+  const tests = order.test_ids.map((id) => catalog.find((c) => c.id === id)).filter(Boolean);
+  return (
+    <div className="p-6 space-y-5">
+      <div className="flex items-center justify-between no-print flex-wrap gap-3">
+        <button onClick={() => setView('orders')} className="text-sm font-bold" style={{ color: C.accent }}>‹ رجوع للطلبات</button>
+        <button onClick={() => window.print()} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>طباعة التقرير</button>
+      </div>
+      {order.has_critical && <div className="px-4 py-3 rounded-lg text-sm font-bold" style={{ background: C.criticalDeepSoft, color: C.criticalDeep }}>⚠ يحتوي هذا التقرير على قيمة حرجة — يوصى بالتواصل الفوري مع الطبيب المعالج</div>}
+      <div id="report-area" className="rounded-lg p-5 md:p-8 overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <div className="flex items-center justify-between flex-wrap gap-2 pb-4 mb-4" style={{ borderBottom: `2px solid ${C.ink}` }}>
+          <div><div className="text-xl font-bold" style={{ color: C.ink }}>مختبر الشفاء الطبي</div><div className="text-xs" style={{ color: C.inkMuted }}>تقرير نتائج التحاليل المخبرية</div></div>
+          <div className="text-left text-xs font-mono" style={{ color: C.inkMuted }}>
+            <div>رقم العينة: {order.sample_id}</div>
+            <div>التاريخ: {fmtDate(order.created_at)}</div>
+            {order.entered_by_name && <div>أُدخلت بواسطة: {order.entered_by_name}</div>}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-6 text-sm">
+          <div><span style={{ color: C.inkMuted }}>اسم المريض: </span><span className="font-bold" style={{ color: C.ink }}>{patient?.name}</span></div>
+          <div><span style={{ color: C.inkMuted }}>العمر: </span><span className="font-bold font-mono" style={{ color: C.ink }}>{patient?.age}</span></div>
+          <div><span style={{ color: C.inkMuted }}>الجنس: </span><span className="font-bold" style={{ color: C.ink }}>{patient?.gender}</span></div>
+        </div>
+        <table className="w-full text-sm min-w-[560px]">
+          <thead><tr style={{ borderBottom: `1px solid ${C.ink}` }}>
+            <th className="text-right py-2 font-bold" style={{ color: C.ink }}>الفحص</th>
+            <th className="text-right py-2 font-bold" style={{ color: C.ink }}>النتيجة</th>
+            <th className="text-right py-2 font-bold" style={{ color: C.ink }}>المعدل الطبيعي</th>
+            <th className="text-right py-2 font-bold" style={{ color: C.ink }}>المؤشر</th>
+            <th className="text-right py-2 font-bold" style={{ color: C.ink }}>الحالة</th>
+          </tr></thead>
+          <tbody>
+            {tests.map((t) => {
+              const value = order.results[t.id];
+              const r = resolveTestRanges(t, patient);
+              const status = classifyValue(value, r);
+              const rowBg = status === 'critical' ? C.criticalDeepSoft : status === 'abnormal' ? C.criticalSoft : 'transparent';
+              return (
+                <tr key={t.id} style={{ borderBottom: `1px solid ${C.line}`, background: rowBg }}>
+                  <td className="py-2.5" style={{ color: C.ink }}>{t.name}</td>
+                  <td className="py-2.5 font-mono font-bold" style={{ color: status !== 'normal' ? C.critical : C.ink }}>{value} {t.unit}</td>
+                  <td className="py-2.5 font-mono text-xs" style={{ color: C.inkMuted }}>{r.min}–{r.max} {t.unit}</td>
+                  <td className="py-2.5 w-28"><RangeGauge value={value} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} /></td>
+                  <td className="py-2.5"><Flag value={value} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} /></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <div className="mt-8 pt-4 text-xs text-center" style={{ borderTop: `1px solid ${C.line}`, color: C.inkFaint }}>هذا التقرير صادر إلكترونياً من نظام إدارة المختبر ولا يغني عن استشارة الطبيب المعالج</div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Inventory
+// ---------------------------------------------------------------------------
+function InventoryView({ inventory, catalog, actions, askConfirm }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState({ name: '', unit: '', quantity: '', threshold: '' });
+  const [error, setError] = useState('');
+  const { page, setPage, totalPages, pageItems } = usePagination(inventory, 6);
+
+  const resetForm = () => { setForm({ name: '', unit: '', quantity: '', threshold: '' }); setEditingId(null); setShowForm(false); setError(''); };
+  const startEdit = (item) => { setEditingId(item.id); setForm({ name: item.name, unit: item.unit, quantity: String(item.quantity), threshold: String(item.threshold) }); setShowForm(true); setError(''); };
+
+  const submit = async () => {
+    if (!form.name.trim()) { setError('اسم الصنف مطلوب'); return; }
+    const quantity = Number(form.quantity), threshold = Number(form.threshold);
+    if (isNaN(quantity) || quantity < 0) { setError('الكمية يجب أن تكون رقماً موجباً'); return; }
+    if (isNaN(threshold) || threshold < 0) { setError('حد التنبيه يجب أن يكون رقماً موجباً'); return; }
+    const payload = { name: form.name.trim(), unit: form.unit.trim() || 'قطعة', quantity, threshold };
+    if (editingId) await actions.updateInventory(editingId, payload); else await actions.addInventory(payload);
+    resetForm();
+  };
+
+  const onDelete = (item) => {
+    const used = catalog.some((c) => c.consumes_item_id === item.id);
+    if (used) { setError(`لا يمكن حذف "${item.name}" — مرتبط بفحص في الإعدادات`); return; }
+    askConfirm({ title: 'حذف صنف', message: `هل تريد حذف "${item.name}"؟`, danger: true, onConfirm: () => actions.deleteInventory(item.id, item.name) });
+  };
+
+  return (
+    <div className="p-6 space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="text-2xl font-bold" style={{ color: C.ink }}>المخزون</div>
+        <button onClick={() => (showForm ? resetForm() : setShowForm(true))} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>+ صنف جديد</button>
+      </div>
+      {showForm && (
+        <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Field label="اسم الصنف"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+            <Field label="الوحدة"><input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+            <Field label="الكمية"><input type="number" min="0" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+            <Field label="حد التنبيه"><input type="number" min="0" value={form.threshold} onChange={(e) => setForm({ ...form, threshold: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+          </div>
+          <ErrorNote>{error}</ErrorNote>
+          <div className="flex gap-2">
+            <button onClick={submit} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>{editingId ? 'حفظ التعديلات' : 'حفظ'}</button>
+            <button onClick={resetForm} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>إلغاء</button>
+          </div>
+        </div>
+      )}
+      {!showForm && <ErrorNote>{error}</ErrorNote>}
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الصنف</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الكمية</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الحالة</th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+            {pageItems.map((item) => {
+              const low = item.quantity <= item.threshold;
+              return (
+                <tr key={item.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{item.name}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <input type="number" min="0" value={item.quantity} onChange={(e) => actions.setQuantity(item.id, item.name, Math.max(0, Number(e.target.value)))} className="w-20 px-2 py-1 rounded-md text-sm font-mono" style={inputStyle} />
+                    <span className="text-xs" style={{ color: C.inkMuted }}> {item.unit}</span>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">{low ? <Badge tone="critical">منخفض</Badge> : <Badge tone="normal">متوفر</Badge>}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => startEdit(item)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>
+                      <button onClick={() => onDelete(item)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <PaginationBar page={page} totalPages={totalPages} setPage={setPage} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Billing
+// ---------------------------------------------------------------------------
+function BillingView({ invoices, orders, patients, actions }) {
+  const [expandedId, setExpandedId] = useState(null);
+  const [payForm, setPayForm] = useState({ amount: '', method: 'نقدي' });
+  const [error, setError] = useState('');
+  const collected = invoices.reduce((s, i) => s + invoicePaid(i), 0);
+  const pending = invoices.reduce((s, i) => s + Math.max(0, i.amount - invoicePaid(i)), 0);
+  const { page, setPage, totalPages, pageItems } = usePagination(invoices, 6);
+
+  const openPay = (inv) => { setExpandedId(inv.id === expandedId ? null : inv.id); setPayForm({ amount: '', method: 'نقدي' }); setError(''); };
+  const submitPayment = async (inv) => {
+    const amount = Number(payForm.amount);
+    const remaining = inv.amount - invoicePaid(inv);
+    if (isNaN(amount) || amount <= 0) { setError('أدخل مبلغاً صحيحاً أكبر من صفر'); return; }
+    if (amount > remaining) { setError(`المبلغ أكبر من المتبقي (${SAR(remaining)})`); return; }
+    await actions.addPayment(inv.id, amount, payForm.method);
+    setExpandedId(null); setError('');
+  };
+
+  return (
+    <div className="p-6 space-y-5">
+      <div className="text-2xl font-bold" style={{ color: C.ink }}>الفواتير</div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <StatCard label="إجمالي المحصّل" value={SAR(collected)} />
+        <StatCard label="قيد التحصيل" value={SAR(pending)} tone={pending ? 'warning' : undefined} />
+      </div>
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المريض</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الإجمالي</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المتبقي</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الحالة</th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+            {pageItems.map((inv) => {
+              const order = orders.find((o) => o.id === inv.order_id);
+              const patient = patients.find((p) => p.id === order?.patient_id);
+              const status = invoiceStatus(inv);
+              const remaining = Math.max(0, inv.amount - invoicePaid(inv));
+              const statusMap = { unpaid: ['warning', 'غير مدفوعة'], partial: ['accent', 'جزئية'], paid: ['normal', 'مدفوعة'], voided: ['muted', 'ملغاة'] };
+              return (
+                <React.Fragment key={inv.id}>
+                  <tr style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{patient?.name}</td>
+                    <td className="px-4 py-3 font-mono font-bold whitespace-nowrap" style={{ color: C.ink }}>{SAR(inv.amount)}</td>
+                    <td className="px-4 py-3 font-mono whitespace-nowrap" style={{ color: remaining ? C.critical : C.inkMuted }}>{SAR(remaining)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap"><Badge tone={statusMap[status][0]}>{statusMap[status][1]}</Badge></td>
+                    <td className="px-4 py-3 whitespace-nowrap">{status !== 'paid' && status !== 'voided' && <button onClick={() => openPay(inv)} className="text-xs font-bold" style={{ color: C.accent }}>تسجيل دفعة</button>}</td>
+                  </tr>
+                  {expandedId === inv.id && (
+                    <tr style={{ background: C.bg }}>
+                      <td colSpan={5} className="px-4 py-3">
+                        <div className="flex flex-wrap items-end gap-3">
+                          <Field label="المبلغ"><input type="number" min="0" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} className="w-32 px-3 py-2 rounded-md text-sm font-mono" style={{ ...inputStyle, background: C.surface }} /></Field>
+                          <Field label="طريقة الدفع"><select value={payForm.method} onChange={(e) => setPayForm({ ...payForm, method: e.target.value })} className="px-3 py-2 rounded-md text-sm" style={{ ...inputStyle, background: C.surface }}><option>نقدي</option><option>بطاقة</option><option>تحويل بنكي</option><option>تأمين طبي</option></select></Field>
+                          <button onClick={() => submitPayment(inv)} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>تأكيد</button>
+                          <button onClick={() => setExpandedId(null)} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>إلغاء</button>
+                        </div>
+                        <ErrorNote>{error}</ErrorNote>
+                        {inv.payments && inv.payments.length > 0 && <div className="mt-3 text-xs space-y-1" style={{ color: C.inkMuted }}>{inv.payments.map((p) => <div key={p.id}>{fmtDate(p.created_at)} · {SAR(p.amount)} · {p.method}</div>)}</div>}
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+        <PaginationBar page={page} totalPages={totalPages} setPage={setPage} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Audit log
+// ---------------------------------------------------------------------------
+function AuditLogView({ auditLog }) {
+  const [query, setQuery] = useState('');
+  const filtered = auditLog.filter((a) => a.action.includes(query) || (a.details || '').includes(query) || (a.user_name || '').includes(query));
+  const { page, setPage, totalPages, pageItems } = usePagination(filtered, 8, query);
+  return (
+    <div className="p-6 space-y-5">
+      <div className="text-2xl font-bold" style={{ color: C.ink }}>سجل التدقيق</div>
+      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="بحث في السجل..." className="w-full px-3 py-2.5 rounded-lg text-sm" style={{ ...inputStyle, background: C.surface }} />
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الوقت</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المستخدم</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الإجراء</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>التفاصيل</th>
+          </tr></thead>
+          <tbody>
+            {pageItems.map((a) => (
+              <tr key={a.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{fmtDateTime(a.created_at)}</td>
+                <td className="px-4 py-3 whitespace-nowrap" style={{ color: C.inkMuted }}>{a.user_name}</td>
+                <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{a.action}</td>
+                <td className="px-4 py-3" style={{ color: C.inkMuted }}>{a.details}</td>
+              </tr>
+            ))}
+            {pageItems.length === 0 && <tr><td colSpan={4}><EmptyState text="لا توجد سجلات مطابقة" /></td></tr>}
+          </tbody>
+        </table>
+        <PaginationBar page={page} totalPages={totalPages} setPage={setPage} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Settings / catalog
+// ---------------------------------------------------------------------------
+function SettingsView({ catalog, inventory, orders, actions, askConfirm }) {
+  const blank = { name: '', unit: '', min: '', max: '', price: '', differentForFemale: false, minF: '', maxF: '', criticalLow: '', criticalHigh: '', consumesItemId: '', consumesQty: '1' };
+  const [form, setForm] = useState(blank);
+  const [editingId, setEditingId] = useState(null);
+  const [error, setError] = useState('');
+
+  const resetForm = () => { setForm(blank); setEditingId(null); setError(''); };
+  const startEdit = (t) => {
+    setEditingId(t.id);
+    setForm({
+      name: t.name, unit: t.unit || '', min: String(t.min), max: String(t.max), price: String(t.price),
+      differentForFemale: t.min_female !== null && t.min_female !== undefined,
+      minF: t.min_female !== null && t.min_female !== undefined ? String(t.min_female) : '',
+      maxF: t.max_female !== null && t.max_female !== undefined ? String(t.max_female) : '',
+      criticalLow: t.critical_low !== null && t.critical_low !== undefined ? String(t.critical_low) : '',
+      criticalHigh: t.critical_high !== null && t.critical_high !== undefined ? String(t.critical_high) : '',
+      consumesItemId: t.consumes_item_id || '', consumesQty: t.consumes_qty ? String(t.consumes_qty) : '1',
+    });
+    setError('');
+  };
+
+  const submit = async () => {
+    if (!form.name.trim()) { setError('اسم الفحص مطلوب'); return; }
+    const min = Number(form.min), max = Number(form.max), price = Number(form.price);
+    if (isNaN(min) || isNaN(max) || min >= max) { setError('يجب أن يكون الحد الأدنى أصغر من الحد الأقصى'); return; }
+    if (isNaN(price) || price < 0) { setError('السعر يجب أن يكون رقماً موجباً'); return; }
+    const payload = {
+      name: form.name.trim(), unit: form.unit.trim(), min, max, price,
+      min_female: form.differentForFemale ? Number(form.minF || min) : null,
+      max_female: form.differentForFemale ? Number(form.maxF || max) : null,
+      critical_low: form.criticalLow !== '' ? Number(form.criticalLow) : null,
+      critical_high: form.criticalHigh !== '' ? Number(form.criticalHigh) : null,
+      consumes_item_id: form.consumesItemId || null,
+      consumes_qty: form.consumesItemId ? Number(form.consumesQty) || 1 : null,
+    };
+    if (editingId) await actions.updateTest(editingId, payload); else await actions.addTest(payload);
+    resetForm();
+  };
+
+  const onDelete = (t) => {
+    const used = orders.some((o) => o.test_ids.includes(t.id));
+    if (used) { setError(`لا يمكن حذف "${t.name}" — مستخدم في طلبات موجودة`); return; }
+    askConfirm({ title: 'حذف فحص', message: `هل تريد حذف "${t.name}"؟`, danger: true, onConfirm: () => actions.deleteTest(t.id, t.name) });
+  };
+
+  return (
+    <div className="p-6 space-y-5">
+      <div className="text-2xl font-bold" style={{ color: C.ink }}>الفحوصات والإعدادات</div>
+      <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <Field label="اسم الفحص"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+          <Field label="الوحدة"><input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+          <Field label="الحد الأدنى"><input type="number" step="any" value={form.min} onChange={(e) => setForm({ ...form, min: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+          <Field label="الحد الأقصى"><input type="number" step="any" value={form.max} onChange={(e) => setForm({ ...form, max: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+          <Field label="السعر"><input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+        </div>
+        <label className="flex items-center gap-2 text-sm" style={{ color: C.ink }}><input type="checkbox" checked={form.differentForFemale} onChange={(e) => setForm({ ...form, differentForFemale: e.target.checked })} /> معدل مختلف للإناث</label>
+        {form.differentForFemale && (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="الحد الأدنى (أنثى)"><input type="number" step="any" value={form.minF} onChange={(e) => setForm({ ...form, minF: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+            <Field label="الحد الأقصى (أنثى)"><input type="number" step="any" value={form.maxF} onChange={(e) => setForm({ ...form, maxF: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="الحد الحرج الأدنى (اختياري)"><input type="number" step="any" value={form.criticalLow} onChange={(e) => setForm({ ...form, criticalLow: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+          <Field label="الحد الحرج الأعلى (اختياري)"><input type="number" step="any" value={form.criticalHigh} onChange={(e) => setForm({ ...form, criticalHigh: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="يستهلك من المخزون (اختياري)">
+            <select value={form.consumesItemId} onChange={(e) => setForm({ ...form, consumesItemId: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+              <option value="">بدون</option>
+              {inventory.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+            </select>
+          </Field>
+          {form.consumesItemId && <Field label="الكمية المستهلكة لكل فحص"><input type="number" min="1" value={form.consumesQty} onChange={(e) => setForm({ ...form, consumesQty: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>}
+        </div>
+        <ErrorNote>{error}</ErrorNote>
+        <div className="flex gap-2">
+          <button onClick={submit} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>{editingId ? 'حفظ التعديلات' : 'إضافة فحص'}</button>
+          {editingId && <button onClick={resetForm} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>إلغاء</button>}
+        </div>
+      </div>
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الفحص</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المعدل</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>السعر</th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+            {catalog.map((c) => (
+              <tr key={c.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{c.name}</td>
+                <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{c.min}–{c.max} {c.unit}{c.min_female !== null && c.min_female !== undefined ? ' (حسب الجنس)' : ''}</td>
+                <td className="px-4 py-3 font-mono whitespace-nowrap" style={{ color: C.ink }}>{SAR(c.price)}</td>
+                <td className="px-4 py-3 whitespace-nowrap"><div className="flex items-center gap-3"><button onClick={() => startEdit(c)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button><button onClick={() => onDelete(c)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button></div></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// App shell (data + realtime + routing)
+// ---------------------------------------------------------------------------
+function AppShell({ session }) {
+  const [displayName, setDisplayName] = useState('');
+  const [view, setView] = useState('dashboard');
+  const [patients, setPatients] = useState([]);
+  const [catalog, setCatalog] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [inventory, setInventory] = useState([]);
+  const [auditLog, setAuditLog] = useState([]);
+  const [activeOrderId, setActiveOrderId] = useState(null);
+  const [patientFilter, setPatientFilter] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saveError, setSaveError] = useState(false);
+  const [confirmState, setConfirmState] = useState(null);
+
+  const askConfirm = (opts) => setConfirmState({ open: true, ...opts });
+  const closeConfirm = () => setConfirmState(null);
+
+  const fetchAll = async () => {
+    try {
+      const [pRes, cRes, oRes, iRes, invRes, aRes, profRes] = await Promise.all([
+        sb.from('patients').select('*').order('created_at', { ascending: false }),
+        sb.from('catalog_tests').select('*').order('created_at'),
+        sb.from('orders').select('*').order('created_at', { ascending: false }),
+        sb.from('invoices').select('*, payments(*)').order('created_at', { ascending: false }),
+        sb.from('inventory').select('*').order('name'),
+        sb.from('audit_log').select('*').order('created_at', { ascending: false }).limit(300),
+        sb.from('profiles').select('*').eq('id', session.user.id).single(),
+      ]);
+      if (pRes.data) setPatients(pRes.data);
+      if (cRes.data) setCatalog(cRes.data);
+      if (oRes.data) setOrders(oRes.data);
+      if (invRes.data) setInvoices(invRes.data);
+      if (iRes.data) setInventory(iRes.data);
+      if (aRes.data) setAuditLog(aRes.data);
+      if (profRes.data) setDisplayName(profRes.data.display_name);
+      setSaveError(false);
+    } catch (e) {
+      setSaveError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAll();
+    const channel = sb.channel('lab-changes')
+      .on('postgres_changes', { event: '*', schema: 'public' }, () => fetchAll())
+      .subscribe();
+    return () => sb.removeChannel(channel);
+  }, []);
+
+  const actions = {
+    addPatient: async (p) => { const { error } = await sb.from('patients').insert(p); if (!error) await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة مريض', p_details: `تسجيل: ${p.name}` }); fetchAll(); },
+    updatePatient: async (id, p) => { await sb.from('patients').update(p).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل مريض', p_details: `تعديل: ${p.name}` }); fetchAll(); },
+    deletePatient: async (id, name) => { await sb.from('patients').delete().eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف مريض', p_details: `حذف: ${name}` }); fetchAll(); },
+
+    addOrder: async (patientId, testIds) => {
+      const patient = patients.find((p) => p.id === patientId);
+      await sb.rpc('create_order', { p_patient_id: patientId, p_test_ids: testIds, p_user_name: displayName, p_patient_name: patient?.name || '' });
+      fetchAll();
+    },
+    cancelOrder: async (orderId, sampleId) => { await sb.rpc('cancel_order', { p_order_id: orderId, p_user_name: displayName, p_sample_id: sampleId }); fetchAll(); },
+    completeOrder: async (orderId, results, hasCritical, sampleId) => { await sb.rpc('complete_order', { p_order_id: orderId, p_results: results, p_has_critical: hasCritical, p_user_name: displayName, p_sample_id: sampleId }); fetchAll(); },
+
+    addPayment: async (invoiceId, amount, method) => { await sb.rpc('add_payment', { p_invoice_id: invoiceId, p_amount: amount, p_method: method, p_user_name: displayName }); fetchAll(); },
+
+    addInventory: async (item) => { await sb.from('inventory').insert(item); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة صنف مخزون', p_details: item.name }); fetchAll(); },
+    updateInventory: async (id, item) => { await sb.from('inventory').update(item).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل صنف مخزون', p_details: item.name }); fetchAll(); },
+    deleteInventory: async (id, name) => { await sb.from('inventory').delete().eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف صنف مخزون', p_details: name }); fetchAll(); },
+    setQuantity: async (id, name, qty) => { await sb.from('inventory').update({ quantity: qty }).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل يدوي للمخزون', p_details: `${name} → ${qty}` }); fetchAll(); },
+
+    addTest: async (t) => { await sb.from('catalog_tests').insert(t); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة فحص', p_details: t.name }); fetchAll(); },
+    updateTest: async (id, t) => { await sb.from('catalog_tests').update(t).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل فحص', p_details: t.name }); fetchAll(); },
+    deleteTest: async (id, name) => { await sb.from('catalog_tests').delete().eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف فحص', p_details: name }); fetchAll(); },
+  };
+
+  const exportBackup = () => {
+    const payload = { exportedAt: new Date().toISOString(), patients, catalog, orders, invoices, inventory, auditLog };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `نسخة-احتياطية-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const activeOrder = orders.find((o) => o.id === activeOrderId) || null;
+  const activePatient = activeOrder ? patients.find((p) => p.id === activeOrder.patient_id) : null;
+  const goToPatientOrders = (patientId) => { setPatientFilter(patientId); setView('orders'); };
+  const navigate = (v) => { setPatientFilter(null); setView(v); };
+
+  if (loading) return <div className="h-screen w-full flex items-center justify-center" style={{ background: C.bg }}><div className="text-sm" style={{ color: C.inkMuted }}>...جارِ تحميل البيانات</div></div>;
+
+  return (
+    <div dir="rtl" lang="ar" className="flex h-screen w-full overflow-hidden" style={{ background: C.bg }}>
+      <div className="no-print h-full"><Sidebar view={view} setView={navigate} displayName={displayName} onLogout={() => sb.auth.signOut()} onExport={exportBackup} saveError={saveError} /></div>
+      <main className="flex-1 h-full overflow-y-auto">
+        {view === 'dashboard' && <Dashboard data={{ patients, catalog, orders, invoices, inventory, auditLog }} setView={setView} setActiveOrderId={setActiveOrderId} />}
+        {view === 'patients' && <PatientsView patients={patients} orders={orders} actions={actions} askConfirm={askConfirm} onViewOrders={goToPatientOrders} />}
+        {view === 'orders' && <OrdersView patients={patients} catalog={catalog} orders={orders} inventory={inventory} actions={actions} setView={setView} setActiveOrderId={setActiveOrderId} filterPatientId={patientFilter} clearFilter={() => setPatientFilter(null)} askConfirm={askConfirm} />}
+        {view === 'results' && <ResultsEntryView order={activeOrder} patient={activePatient} catalog={catalog} actions={actions} setView={setView} />}
+        {view === 'report' && <ReportView order={activeOrder} patient={activePatient} catalog={catalog} setView={setView} />}
+        {view === 'inventory' && <InventoryView inventory={inventory} catalog={catalog} actions={actions} askConfirm={askConfirm} />}
+        {view === 'billing' && <BillingView invoices={invoices} orders={orders} patients={patients} actions={actions} />}
+        {view === 'audit' && <AuditLogView auditLog={auditLog} />}
+        {view === 'settings' && <SettingsView catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} />}
+      </main>
+      <ConfirmDialog state={confirmState} onCancel={closeConfirm} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Root: auth gate
+// ---------------------------------------------------------------------------
+function Root() {
+  const [session, setSession] = useState(undefined); // undefined = still checking
+
+  useEffect(() => {
+    sb.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: listener } = sb.auth.onAuthStateChange((_event, sess) => setSession(sess));
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  if (session === undefined) return <div className="h-screen w-full flex items-center justify-center" style={{ background: C.bg }}><div className="text-sm" style={{ color: C.inkMuted }}>...جارِ التحقق من الدخول</div></div>;
+  if (!session) return <LoginScreen />;
+  return <AppShell key={session.user.id} session={session} />;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
+</script>
+</body>
+</html>
