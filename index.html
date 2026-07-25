@@ -14,7 +14,9 @@
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <!-- Supabase client -->
+<!-- ✅ الجديد -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+
 
 <style>
   @media print {
@@ -37,16 +39,10 @@ window.onerror = function (msg, url, line, col, error) {
 };
 </script>
 
+<!-- ✅ الجديد -->
 <script type="text/babel">
+
 const { useState, useEffect } = React;
-
-// =============================================================================
-// ⚠️ إعداد الاتصال — الصقّ هنا بيانات مشروعك من Supabase (Project Settings > API)
-// =============================================================================
-const SUPABASE_URL = "https://dkdgexaupclewflwyyrl.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_V6XY4M4LoNEMhxWO3DCV7w_SDUI8_az";
-
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // =============================================================================
 // ⚠️ إعداد الاتصال — الصقّ هنا بيانات مشروعك من Supabase (Project Settings > API)
