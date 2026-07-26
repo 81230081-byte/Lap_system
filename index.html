@@ -244,18 +244,21 @@ const NAV = [
   { key: 'financial-reports', label: 'التقارير المالية' },
   { key: 'billing', label: 'الفواتير' },
   { key: 'audit', label: 'سجل التدقيق' },
-  { key: 'settings', label: 'الفحوصات والإعدادات' },
+  { key: 'settings', label: 'الإعدادات' },
 ];
 
-function Sidebar({ view, setView, displayName, onLogout, onExport, saveError }) {
+const MANAGER_ONLY_NAV_KEYS = ['treasury', 'financial-reports'];
+
+function Sidebar({ view, setView, displayName, role, isManager, labName, logoSrc, onLogout, onExport, saveError }) {
+  const items = NAV.filter((item) => isManager || !MANAGER_ONLY_NAV_KEYS.includes(item.key));
   return (
     <div className="w-56 shrink-0 h-full flex flex-col" style={{ background: C.surface, borderLeft: `1px solid ${C.line}` }}>
       <div className="px-5 py-5" style={{ borderBottom: `1px solid ${C.line}` }}>
-        <div className="flex items-center gap-2 mb-0.5"><img src={LOGO_B64} alt="شعار" style={{ height: 28, width: "auto" }} /><div className="text-lg font-bold" style={{ color: C.ink }}>مختبر الشموخ</div></div>
+        <div className="flex items-center gap-2 mb-0.5"><img src={logoSrc || LOGO_B64} alt="شعار" style={{ height: 28, width: "auto" }} /><div className="text-lg font-bold" style={{ color: C.ink }}>{labName || 'مختبر الشموخ'}</div></div>
         <div className="text-xs" style={{ color: C.inkMuted }}>نظام إدارة المختبر</div>
       </div>
       <nav className="flex-1 py-3 px-2 space-y-1 overflow-y-auto">
-        {NAV.map((item) => {
+        {items.map((item) => {
           const active = view === item.key;
           return (
             <button key={item.key} onClick={() => setView(item.key)} className="w-full text-right px-3 py-2.5 rounded-lg text-sm" style={{ background: active ? C.accentSoft : 'transparent', color: active ? C.accentDark : C.inkMuted, fontWeight: active ? 700 : 500 }}>
@@ -265,7 +268,7 @@ function Sidebar({ view, setView, displayName, onLogout, onExport, saveError }) 
         })}
       </nav>
       <div className="px-4 py-3 space-y-2" style={{ borderTop: `1px solid ${C.line}` }}>
-        <div className="text-xs" style={{ color: C.inkMuted }}>مسجّل الدخول: <span className="font-bold" style={{ color: C.ink }}>{displayName}</span></div>
+        <div className="text-xs" style={{ color: C.inkMuted }}>مسجّل الدخول: <span className="font-bold" style={{ color: C.ink }}>{displayName}</span> <span className="px-1.5 py-0.5 rounded-full font-bold" style={{ background: C.accentSoft, color: C.accentDark, fontSize: 10 }}>{role}</span></div>
         <button onClick={onExport} className="w-full text-xs font-bold px-2 py-1.5 rounded-md" style={{ border: `1px solid ${C.line}`, color: C.accent }}>تصدير نسخة احتياطية</button>
         <button onClick={onLogout} className="w-full text-xs font-bold px-2 py-1.5 rounded-md" style={{ border: `1px solid ${C.line}`, color: C.critical }}>تسجيل الخروج</button>
       </div>
@@ -379,7 +382,7 @@ function Dashboard({ data, setView, setActiveOrderId }) {
 // ---------------------------------------------------------------------------
 // Patients
 // ---------------------------------------------------------------------------
-function PatientsView({ patients, orders, actions, askConfirm, onViewOrders, onViewHistory }) {
+function PatientsView({ patients, orders, actions, askConfirm, onViewOrders, onViewHistory, isManager }) {
   const [showForm, setShowForm] = useState(false);
   const [query, setQuery] = useState('');
   const [editingId, setEditingId] = useState(null);
@@ -455,7 +458,7 @@ function PatientsView({ patients, orders, actions, askConfirm, onViewOrders, onV
                     <button onClick={() => onViewOrders(p.id)} className="text-xs font-bold" style={{ color: C.accent }}>الطلبات</button>
                     <button onClick={() => onViewHistory(p.id)} className="text-xs font-bold" style={{ color: C.accent }}>السجل</button>
                     <button onClick={() => startEdit(p)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>
-                    <button onClick={() => onDelete(p)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>
+                    {isManager && <button onClick={() => onDelete(p)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>}
                   </div>
                 </td>
               </tr>
@@ -536,7 +539,7 @@ function PatientHistoryView({ patient, orders, catalog, setView }) {
   );
 }
 
-function OrdersView({ patients, catalog, orders, inventory, actions, setView, setActiveOrderId, filterPatientId, clearFilter, askConfirm }) {
+function OrdersView({ patients, catalog, orders, inventory, actions, setView, setActiveOrderId, filterPatientId, clearFilter, askConfirm, isManager }) {
   const [tab, setTab] = useState('list');
   const [selectedPatient, setSelectedPatient] = useState('');
   const [selectedTests, setSelectedTests] = useState([]);
@@ -645,7 +648,7 @@ function OrdersView({ patients, catalog, orders, inventory, actions, setView, se
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex items-center gap-3">
-                          {o.status === 'pending' && <><button onClick={() => { setActiveOrderId(o.id); setView('results'); }} className="text-xs font-bold" style={{ color: C.accent }}>إدخال النتائج</button><button onClick={() => onCancel(o)} className="text-xs font-bold" style={{ color: C.critical }}>إلغاء</button></>}
+                          {o.status === 'pending' && <><button onClick={() => { setActiveOrderId(o.id); setView('results'); }} className="text-xs font-bold" style={{ color: C.accent }}>إدخال النتائج</button>{isManager && <button onClick={() => onCancel(o)} className="text-xs font-bold" style={{ color: C.critical }}>إلغاء</button>}</>}
                           {o.status === 'completed' && <button onClick={() => { setActiveOrderId(o.id); setView('report'); }} className="text-xs font-bold" style={{ color: C.accent }}>التقرير</button>}
                         </div>
                       </td>
@@ -718,9 +721,11 @@ function ResultsEntryView({ order, patient, catalog, actions, setView }) {
 // ---------------------------------------------------------------------------
 // Report
 // ---------------------------------------------------------------------------
-function ReportView({ order, patient, catalog, setView }) {
+function ReportView({ order, patient, catalog, setView, labSettings }) {
   if (!order) return <div className="p-6"><EmptyState text="لم يتم تحديد طلب" /></div>;
   const tests = order.test_ids.map((id) => catalog.find((c) => c.id === id)).filter(Boolean);
+  const labName = labSettings?.name || 'مختبر الشموخ';
+  const logoSrc = labSettings?.logo_b64 || LOGO_B64;
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between no-print flex-wrap gap-3">
@@ -730,7 +735,7 @@ function ReportView({ order, patient, catalog, setView }) {
       {order.has_critical && <div className="px-4 py-3 rounded-lg text-sm font-bold" style={{ background: C.criticalDeepSoft, color: C.criticalDeep }}>⚠ يحتوي هذا التقرير على قيمة حرجة — يوصى بالتواصل الفوري مع الطبيب المعالج</div>}
       <div id="report-area" className="rounded-lg p-5 md:p-8 overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <div className="flex items-center justify-between flex-wrap gap-2 pb-4 mb-4" style={{ borderBottom: `2px solid ${C.ink}` }}>
-          <div className="flex items-center gap-3"><img src={LOGO_B64} alt="شعار المختبر" style={{ height: 48, width: "auto" }} /><div><div className="text-xl font-bold" style={{ color: C.ink }}>مختبر الشموخ</div><div className="text-xs" style={{ color: C.inkMuted }}>تقرير نتائج التحاليل المخبرية</div></div></div>
+          <div className="flex items-center gap-3"><img src={logoSrc} alt="شعار المختبر" style={{ height: 48, width: "auto" }} /><div><div className="text-xl font-bold" style={{ color: C.ink }}>{labName}</div><div className="text-xs" style={{ color: C.inkMuted }}>تقرير نتائج التحاليل المخبرية</div></div></div>
           <div className="text-left text-xs font-mono" style={{ color: C.inkMuted }}>
             <div>رقم العينة: {order.sample_id}</div>
             <div>التاريخ: {fmtDate(order.created_at)}</div>
@@ -768,7 +773,7 @@ function ReportView({ order, patient, catalog, setView }) {
             })}
           </tbody>
         </table>
-        <div className="mt-8 pt-4 text-xs text-center" style={{ borderTop: `1px solid ${C.line}`, color: C.inkFaint }}>هذا التقرير صادر إلكترونياً من نظام إدارة المختبر ولا يغني عن استشارة الطبيب المعالج</div>
+        <div className="mt-8 pt-4 text-xs text-center" style={{ borderTop: `1px solid ${C.line}`, color: C.inkFaint }}>{labSettings?.report_footer || 'هذا التقرير صادر إلكترونياً من نظام إدارة المختبر ولا يغني عن استشارة الطبيب المعالج'}</div>
       </div>
     </div>
   );
@@ -869,7 +874,7 @@ function InventoryView({ inventory, catalog, actions, askConfirm }) {
 // ---------------------------------------------------------------------------
 function purchasePaid(p) { return (p.purchase_payments || []).reduce((s, x) => s + Number(x.amount), 0); }
 
-function SuppliersView({ suppliers, purchases, inventory, accounts, actions, askConfirm }) {
+function SuppliersView({ suppliers, purchases, inventory, accounts, actions, askConfirm, isManager }) {
   const [tab, setTab] = useState('suppliers');
 
   return (
@@ -882,13 +887,13 @@ function SuppliersView({ suppliers, purchases, inventory, accounts, actions, ask
         </div>
       </div>
       {tab === 'suppliers'
-        ? <SuppliersTab suppliers={suppliers} purchases={purchases} actions={actions} askConfirm={askConfirm} />
+        ? <SuppliersTab suppliers={suppliers} purchases={purchases} actions={actions} askConfirm={askConfirm} isManager={isManager} />
         : <PurchasesTab suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} />}
     </div>
   );
 }
 
-function SuppliersTab({ suppliers, purchases, actions, askConfirm }) {
+function SuppliersTab({ suppliers, purchases, actions, askConfirm, isManager }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ name: '', phone: '', notes: '' });
@@ -917,10 +922,10 @@ function SuppliersTab({ suppliers, purchases, actions, askConfirm }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      {isManager && <div className="flex justify-end">
         <button onClick={() => (showForm ? resetForm() : setShowForm(true))} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>+ مورد جديد</button>
-      </div>
-      {showForm && (
+      </div>}
+      {showForm && isManager && (
         <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <Field label="اسم المورد"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
@@ -952,10 +957,10 @@ function SuppliersTab({ suppliers, purchases, actions, askConfirm }) {
                   <td className="px-4 py-3 font-mono whitespace-nowrap" style={{ color: C.inkMuted }}>{s.phone}</td>
                   <td className="px-4 py-3 font-mono font-bold whitespace-nowrap" style={{ color: bal ? C.critical : C.inkMuted }}>{SAR(bal)}</td>
                   <td className="px-4 py-3 whitespace-nowrap">
-                    <div className="flex items-center gap-3">
+                    {isManager && <div className="flex items-center gap-3">
                       <button onClick={() => startEdit(s)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>
                       <button onClick={() => onDelete(s)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>
-                    </div>
+                    </div>}
                   </td>
                 </tr>
               );
@@ -1138,7 +1143,7 @@ function accountBalance(account, transactions) {
   return Number(account.opening_balance) + inSum - outSum;
 }
 
-function TreasuryView({ accounts, transactions, actions, askConfirm }) {
+function TreasuryView({ accounts, transactions, actions, askConfirm, isManager }) {
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [accForm, setAccForm] = useState({ name: '', type: 'نقدي', bankName: '', accountNumber: '', openingBalance: '' });
@@ -1191,9 +1196,9 @@ function TreasuryView({ accounts, transactions, actions, askConfirm }) {
         <StatCard label="مصروفات هذا الشهر" value={SAR(monthOut)} tone={monthOut ? 'warning' : undefined} />
       </div>
 
-      <div className="flex justify-end">
+      {isManager && <div className="flex justify-end">
         <button onClick={() => (showAccountForm ? resetAccForm() : setShowAccountForm(true))} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>+ حساب جديد</button>
-      </div>
+      </div>}
 
       {showAccountForm && (
         <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
@@ -1234,8 +1239,8 @@ function TreasuryView({ accounts, transactions, actions, askConfirm }) {
                 <div className="flex items-center gap-3">
                   <div className="font-mono font-bold text-base" style={{ color: C.ink }}>{SAR(bal)}</div>
                   <button onClick={() => openTx(a)} className="text-xs font-bold" style={{ color: C.accent }}>قيد يدوي</button>
-                  <button onClick={() => startEdit(a)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>
-                  <button onClick={() => onDeleteAccount(a)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>
+                  {isManager && <button onClick={() => startEdit(a)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>}
+                  {isManager && <button onClick={() => onDeleteAccount(a)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>}
                 </div>
               </div>
 
@@ -1548,7 +1553,7 @@ function AuditLogView({ auditLog }) {
 // ---------------------------------------------------------------------------
 // Settings / catalog
 // ---------------------------------------------------------------------------
-function SettingsView({ catalog, inventory, orders, actions, askConfirm }) {
+function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager }) {
   const blank = { name: '', unit: '', min: '', max: '', price: '', differentForFemale: false, minF: '', maxF: '', criticalLow: '', criticalHigh: '', consumesItemId: '', consumesQty: '1' };
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
@@ -1594,9 +1599,8 @@ function SettingsView({ catalog, inventory, orders, actions, askConfirm }) {
   };
 
   return (
-    <div className="p-6 space-y-5">
-      <div className="text-2xl font-bold" style={{ color: C.ink }}>الفحوصات والإعدادات</div>
-      <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+    <div className="space-y-5">
+      {isManager && <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <Field label="اسم الفحص"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
           <Field label="الوحدة"><input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
@@ -1629,7 +1633,7 @@ function SettingsView({ catalog, inventory, orders, actions, askConfirm }) {
           <button onClick={submit} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>{editingId ? 'حفظ التعديلات' : 'إضافة فحص'}</button>
           {editingId && <button onClick={resetForm} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>إلغاء</button>}
         </div>
-      </div>
+      </div>}
       <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <table className="w-full text-sm">
           <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
@@ -1644,7 +1648,7 @@ function SettingsView({ catalog, inventory, orders, actions, askConfirm }) {
                 <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{c.name}</td>
                 <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{c.min}–{c.max} {c.unit}{c.min_female !== null && c.min_female !== undefined ? ' (حسب الجنس)' : ''}</td>
                 <td className="px-4 py-3 font-mono whitespace-nowrap" style={{ color: C.ink }}>{SAR(c.price)}</td>
-                <td className="px-4 py-3 whitespace-nowrap"><div className="flex items-center gap-3"><button onClick={() => startEdit(c)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button><button onClick={() => onDelete(c)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button></div></td>
+                <td className="px-4 py-3 whitespace-nowrap">{isManager && <div className="flex items-center gap-3"><button onClick={() => startEdit(c)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button><button onClick={() => onDelete(c)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button></div>}</td>
               </tr>
             ))}
           </tbody>
@@ -1655,10 +1659,142 @@ function SettingsView({ catalog, inventory, orders, actions, askConfirm }) {
 }
 
 // ---------------------------------------------------------------------------
+// Lab info tab (general settings)
+// ---------------------------------------------------------------------------
+function LabInfoTab({ labSettings, actions, isManager }) {
+  const blank = { name: '', phone: '', email: '', address: '', report_footer: '', logo_b64: '' };
+  const [form, setForm] = useState(blank);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setForm({
+      name: labSettings?.name || '', phone: labSettings?.phone || '', email: labSettings?.email || '',
+      address: labSettings?.address || '', report_footer: labSettings?.report_footer || '', logo_b64: labSettings?.logo_b64 || '',
+    });
+  }, [labSettings]);
+
+  const save = async () => {
+    await actions.updateLabSettings({
+      name: form.name.trim() || 'مختبر الشموخ', phone: form.phone.trim() || null, email: form.email.trim() || null,
+      address: form.address.trim() || null, report_footer: form.report_footer.trim() || null, logo_b64: form.logo_b64.trim() || null,
+    });
+    setSaved(true); setTimeout(() => setSaved(false), 2000);
+  };
+
+  return (
+    <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <Field label="اسم المختبر"><input disabled={!isManager} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+        <Field label="رقم الهاتف"><input disabled={!isManager} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+        <Field label="البريد الإلكتروني"><input disabled={!isManager} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+        <Field label="العنوان"><input disabled={!isManager} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+      </div>
+      <Field label="ملاحظة أسفل التقرير المطبوع (اختياري)"><input disabled={!isManager} value={form.report_footer} onChange={(e) => setForm({ ...form, report_footer: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+      {isManager && (
+        <Field label="شعار المختبر (الصق Base64 أو رابط صورة — اتركه فارغاً لاستخدام الشعار الافتراضي)">
+          <textarea value={form.logo_b64} onChange={(e) => setForm({ ...form, logo_b64: e.target.value })} rows={2} className="w-full px-3 py-2 rounded-md text-xs font-mono" style={inputStyle} placeholder="data:image/png;base64,... أو https://..." />
+        </Field>
+      )}
+      {isManager
+        ? <button onClick={save} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>{saved ? '✓ تم الحفظ' : 'حفظ'}</button>
+        : <div className="text-xs" style={{ color: C.inkFaint }}>عرض فقط — التعديل متاح للمدير</div>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Staff tab (manager only)
+// ---------------------------------------------------------------------------
+function StaffTab({ staff, actions, myId }) {
+  const [error, setError] = useState('');
+
+  const changeRole = (p, newRole) => {
+    if (p.id === myId) { setError('لا يمكنك تغيير صلاحيتك الخاصة'); return; }
+    setError('');
+    actions.updateStaffRole(p.id, p.display_name, newRole);
+  };
+  const toggleActive = (p) => {
+    if (p.id === myId) { setError('لا يمكنك تعطيل حسابك الخاص'); return; }
+    setError('');
+    actions.updateStaffActive(p.id, p.display_name, !(p.active !== false));
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="text-xs px-1" style={{ color: C.inkMuted }}>لإضافة موظف جديد: لوحة Supabase ← Authentication ← Add User، ثم حدّد صلاحيته من هذه الشاشة.</div>
+      <ErrorNote>{error}</ErrorNote>
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الاسم</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الصلاحية</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الحالة</th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+            {staff.map((p) => {
+              const isActive = p.active !== false;
+              const isSelf = p.id === myId;
+              return (
+                <tr key={p.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{p.display_name}{isSelf && <span className="text-xs font-normal" style={{ color: C.inkMuted }}> (أنت)</span>}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <select value={p.role} disabled={isSelf} onChange={(e) => changeRole(p, e.target.value)} className="px-2 py-1.5 rounded-md text-sm" style={{ ...inputStyle, opacity: isSelf ? 0.5 : 1 }}>
+                      <option value="فني مختبر">فني مختبر</option>
+                      <option value="مدير">مدير</option>
+                    </select>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">{isActive ? <Badge tone="normal">نشط</Badge> : <Badge tone="critical">معطّل</Badge>}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <button onClick={() => toggleActive(p)} disabled={isSelf} className="text-xs font-bold" style={{ color: isActive ? C.critical : C.normal, opacity: isSelf ? 0.4 : 1 }}>{isActive ? 'تعطيل' : 'تفعيل'}</button>
+                  </td>
+                </tr>
+              );
+            })}
+            {staff.length === 0 && <tr><td colSpan={4}><EmptyState text="لا يوجد موظفون بعد" /></td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Settings (tabbed: tests / lab info / staff)
+// ---------------------------------------------------------------------------
+function SettingsView({ catalog, inventory, orders, actions, askConfirm, isManager, staff, myId, labSettings }) {
+  const [tab, setTab] = useState('tests');
+  const tabs = [
+    { key: 'tests', label: 'الفحوصات' },
+    { key: 'lab', label: 'بيانات المختبر' },
+    ...(isManager ? [{ key: 'staff', label: 'الموظفون' }] : []),
+  ];
+  return (
+    <div className="p-6 space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="text-2xl font-bold" style={{ color: C.ink }}>الإعدادات</div>
+        <div className="flex rounded-lg overflow-hidden" style={{ border: `1px solid ${C.line}` }}>
+          {tabs.map((t) => (
+            <button key={t.key} onClick={() => setTab(t.key)} className="px-4 py-2 text-sm font-bold" style={{ background: tab === t.key ? C.accent : C.surface, color: tab === t.key ? '#fff' : C.inkMuted }}>{t.label}</button>
+          ))}
+        </div>
+      </div>
+      {tab === 'tests' && <TestsTab catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
+      {tab === 'lab' && <LabInfoTab labSettings={labSettings} actions={actions} isManager={isManager} />}
+      {tab === 'staff' && isManager && <StaffTab staff={staff} actions={actions} myId={myId} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // App shell (data + realtime + routing)
 // ---------------------------------------------------------------------------
 function AppShell({ session }) {
   const [displayName, setDisplayName] = useState('');
+  const [role, setRole] = useState('');
+  const [myActive, setMyActive] = useState(true);
+  const [staff, setStaff] = useState([]);
+  const [labSettings, setLabSettings] = useState(null);
   const [view, setView] = useState('dashboard');
   const [patients, setPatients] = useState([]);
   const [catalog, setCatalog] = useState([]);
@@ -1678,23 +1814,25 @@ function AppShell({ session }) {
   const [saveError, setSaveError] = useState(false);
   const [confirmState, setConfirmState] = useState(null);
 
+  const isManager = role === 'مدير';
   const askConfirm = (opts) => setConfirmState({ open: true, ...opts });
   const closeConfirm = () => setConfirmState(null);
 
   const fetchAll = async () => {
     try {
-      const [pRes, cRes, oRes, invRes, invenRes, aRes, profRes, supRes, purRes, accRes, txRes] = await Promise.all([
+      const [pRes, cRes, oRes, invRes, invenRes, aRes, profRes, supRes, purRes, accRes, txRes, lsRes] = await Promise.all([
         sb.from('patients').select('*').order('created_at', { ascending: false }),
         sb.from('catalog_tests').select('*').order('created_at'),
         sb.from('orders').select('*').order('created_at', { ascending: false }),
         sb.from('invoices').select('*, payments(*)').order('created_at', { ascending: false }),
         sb.from('inventory').select('*').order('name'),
         sb.from('audit_log').select('*').order('created_at', { ascending: false }).limit(300),
-        sb.from('profiles').select('*').eq('id', session.user.id).single(),
+        sb.from('profiles').select('*').order('created_at'),
         sb.from('suppliers').select('*').order('name'),
         sb.from('purchases').select('*, purchase_payments(*)').order('created_at', { ascending: false }),
         sb.from('accounts').select('*').order('created_at'),
         sb.from('transactions').select('*').order('created_at', { ascending: false }).limit(500),
+        sb.from('lab_settings').select('*').eq('id', true).maybeSingle(),
       ]);
       if (pRes.data) setPatients(pRes.data);
       if (cRes.data) setCatalog(cRes.data);
@@ -1702,11 +1840,16 @@ function AppShell({ session }) {
       if (invRes.data) setInvoices(invRes.data);
       if (invenRes.data) setInventory(invenRes.data);
       if (aRes.data) setAuditLog(aRes.data);
-      if (profRes.data) setDisplayName(profRes.data.display_name);
+      if (profRes.data) {
+        setStaff(profRes.data);
+        const me = profRes.data.find((p) => p.id === session.user.id);
+        if (me) { setDisplayName(me.display_name); setRole(me.role); setMyActive(me.active !== false); }
+      }
       if (supRes.data) setSuppliers(supRes.data);
       if (purRes.data) setPurchases(purRes.data);
       if (accRes.data) setAccounts(accRes.data);
       if (txRes.data) setTransactions(txRes.data);
+      if (lsRes.data) setLabSettings(lsRes.data);
       setSaveError(false);
     } catch (e) {
       setSaveError(true);
@@ -1761,6 +1904,11 @@ function AppShell({ session }) {
     updateAccount: async (id, a) => { await sb.from('accounts').update(a).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل حساب', p_details: a.name }); fetchAll(); },
     deleteAccount: async (id, name) => { await sb.from('accounts').delete().eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف حساب', p_details: name }); fetchAll(); },
     addManualTransaction: async (accountId, direction, amount, category, description) => { await sb.rpc('add_manual_transaction', { p_account_id: accountId, p_direction: direction, p_amount: amount, p_category: category, p_description: description || null, p_user_name: displayName }); fetchAll(); },
+
+    updateStaffRole: async (id, name, newRole) => { await sb.from('profiles').update({ role: newRole }).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تغيير صلاحية موظف', p_details: `${name} → ${newRole}` }); fetchAll(); },
+    updateStaffActive: async (id, name, isActive) => { await sb.from('profiles').update({ active: isActive }).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: isActive ? 'تفعيل حساب موظف' : 'تعطيل حساب موظف', p_details: name }); fetchAll(); },
+    updateStaffName: async (id, name) => { await sb.from('profiles').update({ display_name: name }).eq('id', id); fetchAll(); },
+    updateLabSettings: async (patch) => { await sb.from('lab_settings').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', true); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل بيانات المختبر', p_details: '' }); fetchAll(); },
   };
 
   const exportBackup = () => {
@@ -1780,6 +1928,18 @@ function AppShell({ session }) {
 
   if (loading) return <div className="h-screen w-full flex items-center justify-center" style={{ background: C.bg }}><div className="text-sm" style={{ color: C.inkMuted }}>...جارِ تحميل البيانات</div></div>;
 
+  if (!myActive) {
+    return (
+      <div dir="rtl" lang="ar" className="h-screen w-full flex items-center justify-center p-4" style={{ background: C.bg }}>
+        <div className="w-full max-w-sm rounded-lg p-6 text-center" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="text-lg font-bold mb-2" style={{ color: C.critical }}>الحساب معطّل</div>
+          <div className="text-sm mb-5" style={{ color: C.inkMuted }}>تم تعطيل هذا الحساب من قِبل الإدارة. تواصل مع مدير المختبر إذا كان هذا غير متوقع.</div>
+          <button onClick={() => sb.auth.signOut()} className="w-full px-4 py-2.5 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>تسجيل الخروج</button>
+        </div>
+      </div>
+    );
+  }
+
   const historyPatient = patients.find((p) => p.id === historyPatientId) || null;
   const goToPatientHistory = (patientId) => { setHistoryPatientId(patientId); setView('history'); };
   const navigateMobile = (v) => { navigate(v); setMobileNavOpen(false); };
@@ -1790,28 +1950,28 @@ function AppShell({ session }) {
         <div className="fixed inset-0 z-40 md:hidden" style={{ background: 'rgba(28,38,34,0.5)' }} onClick={() => setMobileNavOpen(false)} />
       )}
       <div className={`no-print h-full ${mobileNavOpen ? 'fixed inset-y-0 right-0 z-50' : 'hidden'} md:static md:block md:z-auto`}>
-        <Sidebar view={view} setView={navigateMobile} displayName={displayName} onLogout={() => sb.auth.signOut()} onExport={exportBackup} saveError={saveError} />
+        <Sidebar view={view} setView={navigateMobile} displayName={displayName} role={role} isManager={isManager} labName={labSettings?.name} logoSrc={labSettings?.logo_b64 || LOGO_B64} onLogout={() => sb.auth.signOut()} onExport={exportBackup} saveError={saveError} />
       </div>
       <div className="flex-1 h-full flex flex-col overflow-hidden">
         <div className="no-print md:hidden flex items-center justify-between px-4 py-3" style={{ background: C.surface, borderBottom: `1px solid ${C.line}` }}>
           <button onClick={() => setMobileNavOpen(true)} className="text-2xl leading-none px-1" style={{ color: C.ink }}>☰</button>
-          <div className="font-bold text-sm" style={{ color: C.ink }}>مختبر الشموخ</div>
+          <div className="font-bold text-sm" style={{ color: C.ink }}>{labSettings?.name || 'مختبر الشموخ'}</div>
           <div style={{ width: 24 }} />
         </div>
         <main className="flex-1 overflow-y-auto">
           {view === 'dashboard' && <Dashboard data={{ patients, catalog, orders, invoices, inventory, auditLog }} setView={setView} setActiveOrderId={setActiveOrderId} />}
-          {view === 'patients' && <PatientsView patients={patients} orders={orders} actions={actions} askConfirm={askConfirm} onViewOrders={goToPatientOrders} onViewHistory={goToPatientHistory} />}
-          {view === 'orders' && <OrdersView patients={patients} catalog={catalog} orders={orders} inventory={inventory} actions={actions} setView={setView} setActiveOrderId={setActiveOrderId} filterPatientId={patientFilter} clearFilter={() => setPatientFilter(null)} askConfirm={askConfirm} />}
+          {view === 'patients' && <PatientsView patients={patients} orders={orders} actions={actions} askConfirm={askConfirm} onViewOrders={goToPatientOrders} onViewHistory={goToPatientHistory} isManager={isManager} />}
+          {view === 'orders' && <OrdersView patients={patients} catalog={catalog} orders={orders} inventory={inventory} actions={actions} setView={setView} setActiveOrderId={setActiveOrderId} filterPatientId={patientFilter} clearFilter={() => setPatientFilter(null)} askConfirm={askConfirm} isManager={isManager} />}
           {view === 'results' && <ResultsEntryView order={activeOrder} patient={activePatient} catalog={catalog} actions={actions} setView={setView} />}
-          {view === 'report' && <ReportView order={activeOrder} patient={activePatient} catalog={catalog} setView={setView} />}
+          {view === 'report' && <ReportView order={activeOrder} patient={activePatient} catalog={catalog} setView={setView} labSettings={labSettings} />}
           {view === 'history' && <PatientHistoryView patient={historyPatient} orders={orders} catalog={catalog} setView={setView} />}
           {view === 'inventory' && <InventoryView inventory={inventory} catalog={catalog} actions={actions} askConfirm={askConfirm} />}
-          {view === 'suppliers' && <SuppliersView suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} askConfirm={askConfirm} />}
-          {view === 'treasury' && <TreasuryView accounts={accounts} transactions={transactions} actions={actions} askConfirm={askConfirm} />}
-          {view === 'financial-reports' && <FinancialReportsView accounts={accounts} transactions={transactions} />}
+          {view === 'suppliers' && <SuppliersView suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
+          {view === 'treasury' && isManager && <TreasuryView accounts={accounts} transactions={transactions} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
+          {view === 'financial-reports' && isManager && <FinancialReportsView accounts={accounts} transactions={transactions} />}
           {view === 'billing' && <BillingView invoices={invoices} orders={orders} patients={patients} accounts={accounts} actions={actions} />}
           {view === 'audit' && <AuditLogView auditLog={auditLog} />}
-          {view === 'settings' && <SettingsView catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} />}
+          {view === 'settings' && <SettingsView catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} isManager={isManager} staff={staff} myId={session.user.id} labSettings={labSettings} />}
         </main>
       </div>
       <ConfirmDialog state={confirmState} onCancel={closeConfirm} />
