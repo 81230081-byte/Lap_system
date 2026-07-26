@@ -241,6 +241,7 @@ const NAV = [
   { key: 'inventory', label: 'المخزون' },
   { key: 'suppliers', label: 'الموردين والمشتريات' },
   { key: 'treasury', label: 'الصناديق والبنوك' },
+  { key: 'financial-reports', label: 'التقارير المالية' },
   { key: 'billing', label: 'الفواتير' },
   { key: 'audit', label: 'سجل التدقيق' },
   { key: 'settings', label: 'الفحوصات والإعدادات' },
@@ -1277,6 +1278,130 @@ function TreasuryView({ accounts, transactions, actions, askConfirm }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Financial reports
+// ---------------------------------------------------------------------------
+function toDateInputValue(d) { return d.toISOString().slice(0, 10); }
+
+function FinancialReportsView({ accounts, transactions }) {
+  const today = new Date();
+  const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  const [fromDate, setFromDate] = useState(toDateInputValue(firstOfMonth));
+  const [toDate, setToDate] = useState(toDateInputValue(today));
+  const [accountId, setAccountId] = useState('all');
+
+  const inRange = transactions.filter((t) => {
+    const d = new Date(t.created_at);
+    const from = new Date(fromDate + 'T00:00:00');
+    const to = new Date(toDate + 'T23:59:59');
+    const accountMatch = accountId === 'all' || t.account_id === accountId;
+    return d >= from && d <= to && accountMatch;
+  });
+
+  const totalIn = inRange.filter((t) => t.direction === 'in').reduce((s, t) => s + Number(t.amount), 0);
+  const totalOut = inRange.filter((t) => t.direction === 'out').reduce((s, t) => s + Number(t.amount), 0);
+  const net = totalIn - totalOut;
+
+  const byCategory = {};
+  inRange.forEach((t) => {
+    const key = `${t.direction}|${t.category}`;
+    byCategory[key] = (byCategory[key] || 0) + Number(t.amount);
+  });
+  const incomeCats = Object.entries(byCategory).filter(([k]) => k.startsWith('in|')).map(([k, v]) => ({ category: k.slice(3), total: v })).sort((a, b) => b.total - a.total);
+  const expenseCats = Object.entries(byCategory).filter(([k]) => k.startsWith('out|')).map(([k, v]) => ({ category: k.slice(4), total: v })).sort((a, b) => b.total - a.total);
+
+  const sortedTx = inRange.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  return (
+    <div className="p-6 space-y-5">
+      <div className="flex items-center justify-between no-print flex-wrap gap-3">
+        <div className="text-2xl font-bold" style={{ color: C.ink }}>التقارير المالية</div>
+        <button onClick={() => window.print()} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>طباعة التقرير</button>
+      </div>
+
+      <div className="no-print grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Field label="من تاريخ"><input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={{ ...inputStyle, background: C.surface }} /></Field>
+        <Field label="إلى تاريخ"><input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={{ ...inputStyle, background: C.surface }} /></Field>
+        <Field label="الحساب">
+          <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3 py-2 rounded-md text-sm" style={{ ...inputStyle, background: C.surface }}>
+            <option value="all">كل الحسابات</option>
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </Field>
+      </div>
+
+      <div id="report-area" className="space-y-5">
+        <div className="hidden print:block mb-4">
+          <div className="text-xl font-bold" style={{ color: C.ink }}>مختبر الشموخ — تقرير مالي</div>
+          <div className="text-sm" style={{ color: C.inkMuted }}>من {fmtDate(fromDate)} إلى {fmtDate(toDate)}</div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <StatCard label="إجمالي الإيرادات" value={SAR(totalIn)} />
+          <StatCard label="إجمالي المصروفات" value={SAR(totalOut)} tone={totalOut ? 'warning' : undefined} />
+          <StatCard label="صافي الفترة" value={SAR(net)} tone={net < 0 ? 'critical' : undefined} />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+            <div className="font-bold mb-3" style={{ color: C.ink }}>الإيرادات حسب التصنيف</div>
+            {incomeCats.length === 0 ? <EmptyState text="لا توجد إيرادات في هذه الفترة" /> : (
+              <div className="space-y-2">
+                {incomeCats.map((c, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm">
+                    <div style={{ color: C.ink }}>{c.category}</div>
+                    <div className="font-mono font-bold" style={{ color: C.normal }}>{SAR(c.total)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+            <div className="font-bold mb-3" style={{ color: C.ink }}>المصروفات حسب التصنيف</div>
+            {expenseCats.length === 0 ? <EmptyState text="لا توجد مصروفات في هذه الفترة" /> : (
+              <div className="space-y-2">
+                {expenseCats.map((c, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm">
+                    <div style={{ color: C.ink }}>{c.category}</div>
+                    <div className="font-mono font-bold" style={{ color: C.critical }}>{SAR(c.total)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <table className="w-full text-sm">
+            <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+              <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>التاريخ</th>
+              <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الحساب</th>
+              <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>التصنيف</th>
+              <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الوصف</th>
+              <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المبلغ</th>
+            </tr></thead>
+            <tbody>
+              {sortedTx.map((t) => {
+                const acc = accounts.find((a) => a.id === t.account_id);
+                return (
+                  <tr key={t.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{fmtDate(t.created_at)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap" style={{ color: C.ink }}>{acc?.name}</td>
+                    <td className="px-4 py-3 whitespace-nowrap" style={{ color: C.inkMuted }}>{t.category}</td>
+                    <td className="px-4 py-3" style={{ color: C.inkMuted }}>{t.description}</td>
+                    <td className="px-4 py-3 font-mono font-bold whitespace-nowrap" style={{ color: t.direction === 'in' ? C.normal : C.critical }}>{t.direction === 'in' ? '+' : '-'}{SAR(t.amount)}</td>
+                  </tr>
+                );
+              })}
+              {sortedTx.length === 0 && <tr><td colSpan={5}><EmptyState text="لا توجد حركات مالية في هذه الفترة" /></td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BillingView({ invoices, orders, patients, accounts, actions }) {
   const [expandedId, setExpandedId] = useState(null);
   const [payForm, setPayForm] = useState({ amount: '', method: 'نقدي', accountId: accounts[0]?.id || '' });
@@ -1683,6 +1808,7 @@ function AppShell({ session }) {
           {view === 'inventory' && <InventoryView inventory={inventory} catalog={catalog} actions={actions} askConfirm={askConfirm} />}
           {view === 'suppliers' && <SuppliersView suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} askConfirm={askConfirm} />}
           {view === 'treasury' && <TreasuryView accounts={accounts} transactions={transactions} actions={actions} askConfirm={askConfirm} />}
+          {view === 'financial-reports' && <FinancialReportsView accounts={accounts} transactions={transactions} />}
           {view === 'billing' && <BillingView invoices={invoices} orders={orders} patients={patients} accounts={accounts} actions={actions} />}
           {view === 'audit' && <AuditLogView auditLog={auditLog} />}
           {view === 'settings' && <SettingsView catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} />}
