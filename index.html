@@ -85,6 +85,15 @@ function classifyValue(value, r) {
   if (value < r.min || value > r.max) return 'abnormal';
   return 'normal';
 }
+function expiryStatus(dateStr) {
+  if (!dateStr) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const exp = new Date(dateStr); exp.setHours(0, 0, 0, 0);
+  const days = Math.round((exp - today) / 86400000);
+  if (days < 0) return { level: 'expired', days };
+  if (days <= 30) return { level: 'soon', days };
+  return { level: 'ok', days };
+}
 function invoicePaid(inv) { return (inv.payments || []).reduce((s, p) => s + Number(p.amount), 0); }
 function invoiceStatus(inv) {
   if (inv.voided) return 'voided';
@@ -163,6 +172,23 @@ function ConfirmDialog({ state, onCancel }) {
     </div>
   );
 }
+function RejectDialog({ order, onCancel, onConfirm }) {
+  const [reason, setReason] = useState('');
+  if (!order) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(28,38,34,0.45)' }}>
+      <div className="w-full max-w-sm rounded-lg p-5" style={{ background: C.surface }}>
+        <div className="font-bold text-base mb-2" style={{ color: C.ink }}>إرجاع النتائج لإعادة الإدخال</div>
+        <div className="text-sm mb-3" style={{ color: C.inkMuted }}>الطلب {order.sample_id} — وضّح السبب (اختياري) ليتمكن الفني من التصحيح:</div>
+        <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} className="w-full px-3 py-2 rounded-md text-sm mb-4" style={inputStyle} placeholder="مثال: قيمة غير منطقية، يُرجى إعادة الفحص" />
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ color: C.inkMuted, border: `1px solid ${C.line}` }}>إلغاء</button>
+          <button onClick={() => onConfirm(reason)} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ background: C.critical, color: '#fff' }}>إرجاع النتائج</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 function usePagination(items, perPage, resetKey) {
   const [page, setPage] = useState(1);
   useEffect(() => { setPage(1); }, [resetKey]);
@@ -234,6 +260,7 @@ function LoginScreen() {
 // ---------------------------------------------------------------------------
 // Sidebar
 // ---------------------------------------------------------------------------
+const COMMON_TX_CATEGORIES = ['رواتب', 'إيجار', 'كهرباء وماء', 'صيانة', 'مصاريف إدارية', 'إيرادات أخرى', 'أخرى'];
 const NAV = [
   { key: 'dashboard', label: 'لوحة التحكم' },
   { key: 'patients', label: 'المرضى' },
@@ -283,8 +310,13 @@ function Sidebar({ view, setView, displayName, role, isManager, labName, logoSrc
 function Dashboard({ data, setView, setActiveOrderId }) {
   const { patients, catalog, orders, invoices, inventory, auditLog } = data;
   const pendingOrders = orders.filter((o) => o.status === 'pending');
+  const pendingReviewOrders = orders.filter((o) => o.status === 'pending_review');
   const collected = invoices.reduce((s, i) => s + invoicePaid(i), 0);
   const lowStock = inventory.filter((i) => i.quantity <= i.threshold);
+  const expiringItems = inventory
+    .map((i) => ({ item: i, exp: expiryStatus(i.expiry_date) }))
+    .filter((x) => x.exp && (x.exp.level === 'expired' || x.exp.level === 'soon'))
+    .sort((a, b) => a.exp.days - b.exp.days);
 
   const flagged = [];
   orders.filter((o) => o.status === 'completed').forEach((o) => {
@@ -302,14 +334,15 @@ function Dashboard({ data, setView, setActiveOrderId }) {
   return (
     <div className="p-6 space-y-6">
       <div className="text-2xl font-bold" style={{ color: C.ink }}>لوحة التحكم</div>
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatCard label="إجمالي المرضى" value={patients.length} />
         <StatCard label="عينات قيد الانتظار" value={pendingOrders.length} tone={pendingOrders.length ? 'warning' : undefined} />
+        <StatCard label="بانتظار الاعتماد" value={pendingReviewOrders.length} tone={pendingReviewOrders.length ? 'warning' : undefined} />
         <StatCard label="إيرادات محصّلة" value={SAR(collected)} />
         <StatCard label="تنبيهات المخزون" value={lowStock.length} tone={lowStock.length ? 'critical' : undefined} />
         <StatCard label="نتائج حرجة" value={criticalCount} tone={criticalCount ? 'critical' : undefined} />
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
           <div className="font-bold mb-3" style={{ color: C.ink }}>نتائج خارج المعدل الطبيعي</div>
           {flagged.length === 0 ? <EmptyState text="لا توجد نتائج غير طبيعية حالياً" /> : (
@@ -336,8 +369,21 @@ function Dashboard({ data, setView, setActiveOrderId }) {
             </div>
           )}
         </div>
+        <div className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="font-bold mb-3" style={{ color: C.ink }}>صلاحية المخزون</div>
+          {expiringItems.length === 0 ? <EmptyState text="لا توجد أصناف قاربت الانتهاء" /> : (
+            <div className="space-y-3">
+              {expiringItems.slice(0, 5).map(({ item, exp }) => (
+                <div key={item.id} className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-bold truncate" style={{ color: C.ink }}>{item.name}</div>
+                  {exp.level === 'expired' ? <Badge tone="critical">منتهي منذ {Math.abs(exp.days)} يوم</Badge> : <Badge tone="warning">{exp.days} يوم متبقي</Badge>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
           <div className="flex items-center justify-between mb-3">
             <div className="font-bold" style={{ color: C.ink }}>عينات قيد الانتظار</div>
@@ -351,6 +397,25 @@ function Dashboard({ data, setView, setActiveOrderId }) {
                   <div key={o.id} className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${C.line}` }}>
                     <div><div className="text-sm font-bold" style={{ color: C.ink }}>{patient?.name}</div><div className="text-xs font-mono" style={{ color: C.inkMuted }}>{o.sample_id}</div></div>
                     <button onClick={() => { setActiveOrderId(o.id); setView('results'); }} className="text-sm font-bold px-3 py-1.5 rounded-md" style={{ background: C.accent, color: '#fff' }}>إدخال النتائج</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="font-bold" style={{ color: C.ink }}>بانتظار اعتماد النتائج</div>
+            <button onClick={() => setView('orders')} className="text-sm font-bold" style={{ color: C.accent }}>عرض الكل ‹</button>
+          </div>
+          {pendingReviewOrders.length === 0 ? <EmptyState text="لا توجد نتائج بانتظار الاعتماد" /> : (
+            <div className="space-y-2">
+              {pendingReviewOrders.slice(0, 5).map((o) => {
+                const patient = patients.find((p) => p.id === o.patient_id);
+                return (
+                  <div key={o.id} className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <div><div className="text-sm font-bold" style={{ color: C.ink }}>{patient?.name}</div><div className="text-xs font-mono" style={{ color: C.inkMuted }}>{o.sample_id}{o.has_critical ? ' · حرج ⚠' : ''}</div></div>
+                    <button onClick={() => setView('orders')} className="text-sm font-bold px-3 py-1.5 rounded-md" style={{ border: `1px solid ${C.accent}`, color: C.accent }}>مراجعة</button>
                   </div>
                 );
               })}
@@ -543,9 +608,13 @@ function OrdersView({ patients, catalog, orders, inventory, actions, setView, se
   const [tab, setTab] = useState('list');
   const [selectedPatient, setSelectedPatient] = useState('');
   const [selectedTests, setSelectedTests] = useState([]);
+  const [referringDoctor, setReferringDoctor] = useState('');
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [busy, setBusy] = useState(false);
+  const [rejectingOrder, setRejectingOrder] = useState(null);
+
+  const knownDoctors = [...new Set(orders.map((o) => o.referring_doctor).filter(Boolean))];
 
   const total = catalog.filter((c) => selectedTests.includes(c.id)).reduce((s, c) => s + Number(c.price), 0);
   const canSubmit = Boolean(selectedPatient) && selectedTests.length > 0 && !busy;
@@ -557,9 +626,9 @@ function OrdersView({ patients, catalog, orders, inventory, actions, setView, se
   const submit = async () => {
     if (!canSubmit) return;
     setBusy(true);
-    await actions.addOrder(selectedPatient, selectedTests);
+    await actions.addOrder(selectedPatient, selectedTests, referringDoctor.trim() || null);
     setBusy(false);
-    setSelectedPatient(''); setSelectedTests([]); setTab('list');
+    setSelectedPatient(''); setSelectedTests([]); setReferringDoctor(''); setTab('list');
   };
 
   let visible = filterPatientId ? orders.filter((o) => o.patient_id === filterPatientId) : orders;
@@ -574,6 +643,7 @@ function OrdersView({ patients, catalog, orders, inventory, actions, setView, se
   const { page, setPage, totalPages, pageItems } = usePagination(visible, 6, query + statusFilter + filterPatientId);
 
   const onCancel = (o) => askConfirm({ title: 'إلغاء الطلب', message: `هل تريد إلغاء الطلب ${o.sample_id}؟`, danger: true, confirmLabel: 'إلغاء الطلب', onConfirm: () => actions.cancelOrder(o.id, o.sample_id) });
+  const onVerify = (o) => askConfirm({ title: 'اعتماد النتائج', message: `هل تريد اعتماد نتائج الطلب ${o.sample_id}؟ سيصبح التقرير متاحاً للطباعة.`, confirmLabel: 'اعتماد', onConfirm: () => actions.verifyResults(o.id, o.sample_id) });
 
   return (
     <div className="p-6 space-y-5">
@@ -595,6 +665,10 @@ function OrdersView({ patients, catalog, orders, inventory, actions, setView, se
               <option value="">اختر مريضاً...</option>
               {patients.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
+          </Field>
+          <Field label="الطبيب المحوّل (اختياري)">
+            <input list="referring-doctors-list" value={referringDoctor} onChange={(e) => setReferringDoctor(e.target.value)} placeholder="اسم الطبيب..." className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} />
+            <datalist id="referring-doctors-list">{knownDoctors.map((d) => <option key={d} value={d} />)}</datalist>
           </Field>
           <div>
             <div className="text-xs font-bold mb-2" style={{ color: C.inkMuted }}>الفحوصات المطلوبة</div>
@@ -621,7 +695,7 @@ function OrdersView({ patients, catalog, orders, inventory, actions, setView, se
           <div className="flex flex-wrap gap-3">
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="بحث باسم المريض أو رقم العينة..." className="flex-1 min-w-[200px] px-3 py-2.5 rounded-lg text-sm" style={{ ...inputStyle, background: C.surface }} />
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2.5 rounded-lg text-sm" style={{ ...inputStyle, background: C.surface }}>
-              <option value="all">كل الحالات</option><option value="pending">قيد الانتظار</option><option value="completed">مكتمل</option><option value="cancelled">ملغى</option>
+              <option value="all">كل الحالات</option><option value="pending">قيد الانتظار</option><option value="pending_review">بانتظار الاعتماد</option><option value="completed">مكتمل</option><option value="cancelled">ملغى</option>
             </select>
           </div>
           <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
@@ -639,16 +713,24 @@ function OrdersView({ patients, catalog, orders, inventory, actions, setView, se
                   return (
                     <tr key={o.id} style={{ borderBottom: `1px solid ${C.line}` }}>
                       <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{o.sample_id}</td>
-                      <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{patient?.name}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="font-bold" style={{ color: C.ink }}>{patient?.name}</div>
+                        {o.referring_doctor && <div className="text-xs" style={{ color: C.inkMuted }}>د. {o.referring_doctor}</div>}
+                      </td>
                       <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{fmtDate(o.created_at)}</td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         {o.status === 'pending' && <Badge tone="warning">قيد الانتظار</Badge>}
+                        {o.status === 'pending_review' && <Badge tone="accent">بانتظار الاعتماد</Badge>}
                         {o.status === 'completed' && <Badge tone={o.has_critical ? 'critical' : 'normal'}>{o.has_critical ? 'مكتمل — حرج' : 'مكتمل'}</Badge>}
                         {o.status === 'cancelled' && <Badge tone="muted">ملغى</Badge>}
+                        {o.status === 'pending' && o.rejection_note && <div className="text-xs mt-1" style={{ color: C.critical, maxWidth: 180 }}>أُرجعت: {o.rejection_note}</div>}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex items-center gap-3">
                           {o.status === 'pending' && <><button onClick={() => { setActiveOrderId(o.id); setView('results'); }} className="text-xs font-bold" style={{ color: C.accent }}>إدخال النتائج</button>{isManager && <button onClick={() => onCancel(o)} className="text-xs font-bold" style={{ color: C.critical }}>إلغاء</button>}</>}
+                          {o.status === 'pending_review' && (isManager
+                            ? <><button onClick={() => onVerify(o)} className="text-xs font-bold" style={{ color: C.normal }}>اعتماد</button><button onClick={() => setRejectingOrder(o)} className="text-xs font-bold" style={{ color: C.critical }}>إرجاع</button></>
+                            : <span className="text-xs" style={{ color: C.inkFaint }}>بانتظار مراجعة المدير</span>)}
                           {o.status === 'completed' && <button onClick={() => { setActiveOrderId(o.id); setView('report'); }} className="text-xs font-bold" style={{ color: C.accent }}>التقرير</button>}
                         </div>
                       </td>
@@ -662,6 +744,7 @@ function OrdersView({ patients, catalog, orders, inventory, actions, setView, se
           </div>
         </div>
       )}
+      <RejectDialog order={rejectingOrder} onCancel={() => setRejectingOrder(null)} onConfirm={(reason) => { actions.rejectResults(rejectingOrder.id, rejectingOrder.sample_id, reason); setRejectingOrder(null); }} />
     </div>
   );
 }
@@ -686,9 +769,9 @@ function ResultsEntryView({ order, patient, catalog, actions, setView }) {
     if (!allFilled) return;
     setBusy(true);
     const numeric = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, Number(v)]));
-    await actions.completeOrder(order.id, numeric, anyCritical, order.sample_id);
+    await actions.submitResults(order.id, numeric, anyCritical, order.sample_id);
     setBusy(false);
-    setView('report');
+    setView('orders');
   };
 
   return (
@@ -698,6 +781,7 @@ function ResultsEntryView({ order, patient, catalog, actions, setView }) {
         <div className="text-2xl font-bold" style={{ color: C.ink }}>إدخال النتائج</div>
         <div className="text-sm font-mono" style={{ color: C.inkMuted }}>{patient?.name} · {order.sample_id}</div>
       </div>
+      {order.rejection_note && <div className="px-4 py-3 rounded-lg text-sm" style={{ background: C.warningSoft, color: C.warning }}><span className="font-bold">أُرجع هذا الطلب من المدير لإعادة الإدخال: </span>{order.rejection_note}</div>}
       {anyCritical && <div className="px-4 py-3 rounded-lg text-sm font-bold" style={{ background: C.criticalDeepSoft, color: C.criticalDeep }}>⚠ توجد قيمة حرجة ضمن هذه النتائج — يُرجى التأكد منها قبل الحفظ</div>}
       <div className="rounded-lg" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         {tests.map((t, idx) => {
@@ -713,7 +797,7 @@ function ResultsEntryView({ order, patient, catalog, actions, setView }) {
           );
         })}
       </div>
-      <button onClick={save} disabled={!allFilled || busy} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff', opacity: allFilled && !busy ? 1 : 0.4 }}>{busy ? '...جارِ الحفظ' : 'حفظ النتائج وإكمال الطلب'}</button>
+      <button onClick={save} disabled={!allFilled || busy} className="px-5 py-2.5 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff', opacity: allFilled && !busy ? 1 : 0.4 }}>{busy ? '...جارِ الحفظ' : 'إرسال النتائج للمراجعة'}</button>
     </div>
   );
 }
@@ -723,6 +807,14 @@ function ResultsEntryView({ order, patient, catalog, actions, setView }) {
 // ---------------------------------------------------------------------------
 function ReportView({ order, patient, catalog, setView, labSettings }) {
   if (!order) return <div className="p-6"><EmptyState text="لم يتم تحديد طلب" /></div>;
+  if (order.status !== 'completed') {
+    return (
+      <div className="p-6 space-y-4">
+        <button onClick={() => setView('orders')} className="text-sm font-bold" style={{ color: C.accent }}>‹ رجوع للطلبات</button>
+        <EmptyState text="التقرير غير متاح للطباعة بعد — بانتظار اعتماد المدير للنتائج" />
+      </div>
+    );
+  }
   const tests = order.test_ids.map((id) => catalog.find((c) => c.id === id)).filter(Boolean);
   const labName = labSettings?.name || 'مختبر الشموخ';
   const logoSrc = labSettings?.logo_b64 || LOGO_B64;
@@ -740,12 +832,14 @@ function ReportView({ order, patient, catalog, setView, labSettings }) {
             <div>رقم العينة: {order.sample_id}</div>
             <div>التاريخ: {fmtDate(order.created_at)}</div>
             {order.entered_by_name && <div>أُدخلت بواسطة: {order.entered_by_name}</div>}
+            {order.verified_by_name && <div>اعتمدت بواسطة: {order.verified_by_name}</div>}
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-6 text-sm">
           <div><span style={{ color: C.inkMuted }}>اسم المريض: </span><span className="font-bold" style={{ color: C.ink }}>{patient?.name}</span></div>
           <div><span style={{ color: C.inkMuted }}>العمر: </span><span className="font-bold font-mono" style={{ color: C.ink }}>{patient?.age}</span></div>
           <div><span style={{ color: C.inkMuted }}>الجنس: </span><span className="font-bold" style={{ color: C.ink }}>{patient?.gender}</span></div>
+          {order.referring_doctor && <div><span style={{ color: C.inkMuted }}>الطبيب المحوّل: </span><span className="font-bold" style={{ color: C.ink }}>د. {order.referring_doctor}</span></div>}
         </div>
         <table className="w-full text-sm min-w-[560px]">
           <thead><tr style={{ borderBottom: `1px solid ${C.ink}` }}>
@@ -785,19 +879,19 @@ function ReportView({ order, patient, catalog, setView, labSettings }) {
 function InventoryView({ inventory, catalog, actions, askConfirm }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState({ name: '', unit: '', quantity: '', threshold: '' });
+  const [form, setForm] = useState({ name: '', unit: '', quantity: '', threshold: '', expiry: '' });
   const [error, setError] = useState('');
   const { page, setPage, totalPages, pageItems } = usePagination(inventory, 6);
 
-  const resetForm = () => { setForm({ name: '', unit: '', quantity: '', threshold: '' }); setEditingId(null); setShowForm(false); setError(''); };
-  const startEdit = (item) => { setEditingId(item.id); setForm({ name: item.name, unit: item.unit, quantity: String(item.quantity), threshold: String(item.threshold) }); setShowForm(true); setError(''); };
+  const resetForm = () => { setForm({ name: '', unit: '', quantity: '', threshold: '', expiry: '' }); setEditingId(null); setShowForm(false); setError(''); };
+  const startEdit = (item) => { setEditingId(item.id); setForm({ name: item.name, unit: item.unit, quantity: String(item.quantity), threshold: String(item.threshold), expiry: item.expiry_date || '' }); setShowForm(true); setError(''); };
 
   const submit = async () => {
     if (!form.name.trim()) { setError('اسم الصنف مطلوب'); return; }
     const quantity = Number(form.quantity), threshold = Number(form.threshold);
     if (isNaN(quantity) || quantity < 0) { setError('الكمية يجب أن تكون رقماً موجباً'); return; }
     if (isNaN(threshold) || threshold < 0) { setError('حد التنبيه يجب أن يكون رقماً موجباً'); return; }
-    const payload = { name: form.name.trim(), unit: form.unit.trim() || 'قطعة', quantity, threshold };
+    const payload = { name: form.name.trim(), unit: form.unit.trim() || 'قطعة', quantity, threshold, expiry_date: form.expiry || null };
     if (editingId) await actions.updateInventory(editingId, payload); else await actions.addInventory(payload);
     resetForm();
   };
@@ -816,11 +910,12 @@ function InventoryView({ inventory, catalog, actions, askConfirm }) {
       </div>
       {showForm && (
         <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <Field label="اسم الصنف"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
             <Field label="الوحدة"><input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
             <Field label="الكمية"><input type="number" min="0" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
             <Field label="حد التنبيه"><input type="number" min="0" value={form.threshold} onChange={(e) => setForm({ ...form, threshold: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+            <Field label="تاريخ الصلاحية (اختياري)"><input type="date" value={form.expiry} onChange={(e) => setForm({ ...form, expiry: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
           </div>
           <ErrorNote>{error}</ErrorNote>
           <div className="flex gap-2">
@@ -836,11 +931,13 @@ function InventoryView({ inventory, catalog, actions, askConfirm }) {
             <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الصنف</th>
             <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الكمية</th>
             <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الحالة</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الصلاحية</th>
             <th></th>
           </tr></thead>
           <tbody>
             {pageItems.map((item) => {
               const low = item.quantity <= item.threshold;
+              const exp = expiryStatus(item.expiry_date);
               return (
                 <tr key={item.id} style={{ borderBottom: `1px solid ${C.line}` }}>
                   <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{item.name}</td>
@@ -849,6 +946,12 @@ function InventoryView({ inventory, catalog, actions, askConfirm }) {
                     <span className="text-xs" style={{ color: C.inkMuted }}> {item.unit}</span>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">{low ? <Badge tone="critical">منخفض</Badge> : <Badge tone="normal">متوفر</Badge>}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    {!exp && <span className="text-xs" style={{ color: C.inkFaint }}>—</span>}
+                    {exp && exp.level === 'expired' && <Badge tone="critical">منتهي منذ {Math.abs(exp.days)} يوم</Badge>}
+                    {exp && exp.level === 'soon' && <Badge tone="warning">ينتهي خلال {exp.days} يوم</Badge>}
+                    {exp && exp.level === 'ok' && <span className="text-xs font-mono" style={{ color: C.inkMuted }}>{fmtDate(item.expiry_date)}</span>}
+                  </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="flex items-center gap-3">
                       <button onClick={() => startEdit(item)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>
@@ -1143,7 +1246,7 @@ function accountBalance(account, transactions) {
   return Number(account.opening_balance) + inSum - outSum;
 }
 
-function TreasuryView({ accounts, transactions, actions, askConfirm, isManager }) {
+function AccountsTab({ accounts, transactions, actions, askConfirm, isManager }) {
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [accForm, setAccForm] = useState({ name: '', type: 'نقدي', bankName: '', accountNumber: '', openingBalance: '' });
@@ -1186,9 +1289,7 @@ function TreasuryView({ accounts, transactions, actions, askConfirm, isManager }
   };
 
   return (
-    <div className="p-6 space-y-5">
-      <div className="text-2xl font-bold" style={{ color: C.ink }}>الصناديق والبنوك</div>
-
+    <div className="space-y-5">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="إجمالي الصناديق النقدية" value={SAR(cashTotal)} />
         <StatCard label="إجمالي الحسابات البنكية" value={SAR(bankTotal)} />
@@ -1254,7 +1355,10 @@ function TreasuryView({ accounts, transactions, actions, askConfirm, isManager }
                       </select>
                     </Field>
                     <Field label="المبلغ"><input type="number" min="0" value={txForm.amount} onChange={(e) => setTxForm({ ...txForm, amount: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
-                    <Field label="التصنيف"><input value={txForm.category} onChange={(e) => setTxForm({ ...txForm, category: e.target.value })} placeholder="إيجار، رواتب..." className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+                    <Field label="التصنيف">
+                      <input list="tx-categories-list" value={txForm.category} onChange={(e) => setTxForm({ ...txForm, category: e.target.value })} placeholder="إيجار، رواتب..." className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} />
+                      <datalist id="tx-categories-list">{COMMON_TX_CATEGORIES.map((c) => <option key={c} value={c} />)}</datalist>
+                    </Field>
                     <Field label="ملاحظات (اختياري)"><input value={txForm.description} onChange={(e) => setTxForm({ ...txForm, description: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
                   </div>
                   <div className="flex gap-2">
@@ -1284,11 +1388,133 @@ function TreasuryView({ accounts, transactions, actions, askConfirm, isManager }
 }
 
 // ---------------------------------------------------------------------------
+// Payroll
+// ---------------------------------------------------------------------------
+function PayrollTab({ staff, accounts, salaryPayments, actions }) {
+  const [editingSalaryId, setEditingSalaryId] = useState(null);
+  const [salaryDraft, setSalaryDraft] = useState('');
+  const [payingId, setPayingId] = useState(null);
+  const [payForm, setPayForm] = useState({ amount: '', accountId: '', period: '' });
+  const [error, setError] = useState('');
+
+  const startEditSalary = (p) => { setEditingSalaryId(p.id); setSalaryDraft(p.base_salary != null ? String(p.base_salary) : ''); };
+  const saveSalary = (p) => {
+    const val = salaryDraft === '' ? null : Number(salaryDraft);
+    if (val !== null && (isNaN(val) || val < 0)) { setError('الراتب يجب أن يكون رقماً موجباً'); return; }
+    actions.updateStaffSalary(p.id, p.display_name, val);
+    setEditingSalaryId(null); setError('');
+  };
+
+  const openPay = (p) => { setPayingId(p.id); setPayForm({ amount: p.base_salary != null ? String(p.base_salary) : '', accountId: accounts[0]?.id || '', period: '' }); setError(''); };
+  const submitPay = (p) => {
+    const amount = Number(payForm.amount);
+    if (isNaN(amount) || amount <= 0) { setError('أدخل مبلغاً صحيحاً'); return; }
+    if (!payForm.accountId) { setError('اختر الصندوق أو الحساب الذي سيُصرف منه'); return; }
+    actions.paySalary(p.id, p.display_name, amount, payForm.accountId, payForm.period.trim());
+    setPayingId(null); setError('');
+  };
+
+  const paidFor = (profileId) => salaryPayments.filter((s) => s.profile_id === profileId).reduce((s, x) => s + Number(x.amount), 0);
+  const recent = salaryPayments.slice(0, 8);
+
+  return (
+    <div className="space-y-4">
+      <ErrorNote>{error}</ErrorNote>
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الموظف</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الراتب الأساسي</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>إجمالي المصروف</th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+            {staff.map((p) => (
+              <tr key={p.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{p.display_name}<div className="text-xs font-normal" style={{ color: C.inkMuted }}>{p.role}</div></td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  {editingSalaryId === p.id ? (
+                    <div className="flex items-center gap-2">
+                      <input type="number" min="0" value={salaryDraft} onChange={(e) => setSalaryDraft(e.target.value)} className="w-28 px-2 py-1 rounded-md text-sm font-mono" style={inputStyle} autoFocus />
+                      <button onClick={() => saveSalary(p)} className="text-xs font-bold" style={{ color: C.accent }}>حفظ</button>
+                    </div>
+                  ) : (
+                    <button onClick={() => startEditSalary(p)} className="font-mono text-sm" style={{ color: C.ink }}>{p.base_salary != null ? SAR(p.base_salary) : 'تحديد الراتب'}</button>
+                  )}
+                </td>
+                <td className="px-4 py-3 font-mono whitespace-nowrap" style={{ color: C.inkMuted }}>{SAR(paidFor(p.id))}</td>
+                <td className="px-4 py-3 whitespace-nowrap"><button onClick={() => openPay(p)} className="text-xs font-bold px-3 py-1.5 rounded-md" style={{ background: C.accent, color: '#fff' }}>صرف راتب</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {payingId && (() => {
+        const p = staff.find((s) => s.id === payingId);
+        if (!p) return null;
+        return (
+          <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+            <div className="font-bold text-sm" style={{ color: C.ink }}>صرف راتب — {p.display_name}</div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <Field label="المبلغ"><input type="number" min="0" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+              <Field label="يُصرف من">
+                <select value={payForm.accountId} onChange={(e) => setPayForm({ ...payForm, accountId: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+                  <option value="">اختر...</option>
+                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </Field>
+              <Field label="الفترة (اختياري)"><input value={payForm.period} onChange={(e) => setPayForm({ ...payForm, period: e.target.value })} placeholder="مثال: يوليو 2026" className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => submitPay(p)} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>تأكيد الصرف</button>
+              <button onClick={() => setPayingId(null)} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>إلغاء</button>
+            </div>
+          </div>
+        );
+      })()}
+
+      <div className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <div className="font-bold mb-3 text-sm" style={{ color: C.ink }}>آخر عمليات الصرف</div>
+        {recent.length === 0 ? <EmptyState text="لا توجد رواتب مصروفة بعد" /> : (
+          <div className="space-y-2">
+            {recent.map((s) => (
+              <div key={s.id} className="flex items-center justify-between text-sm" style={{ borderBottom: `1px solid ${C.line}`, paddingBottom: 6 }}>
+                <div><span className="font-bold" style={{ color: C.ink }}>{s.staff_name}</span>{s.period && <span className="text-xs" style={{ color: C.inkMuted }}> · {s.period}</span>}</div>
+                <div className="flex items-center gap-2"><span className="font-mono" style={{ color: C.critical }}>{SAR(s.amount)}</span><span className="text-xs font-mono" style={{ color: C.inkFaint }}>{fmtDate(s.created_at)}</span></div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TreasuryView({ accounts, transactions, staff, salaryPayments, actions, askConfirm, isManager }) {
+  const [tab, setTab] = useState('accounts');
+  return (
+    <div className="p-6 space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="text-2xl font-bold" style={{ color: C.ink }}>الصناديق والبنوك</div>
+        <div className="flex rounded-lg overflow-hidden" style={{ border: `1px solid ${C.line}` }}>
+          <button onClick={() => setTab('accounts')} className="px-4 py-2 text-sm font-bold" style={{ background: tab === 'accounts' ? C.accent : C.surface, color: tab === 'accounts' ? '#fff' : C.inkMuted }}>الحسابات</button>
+          <button onClick={() => setTab('payroll')} className="px-4 py-2 text-sm font-bold" style={{ background: tab === 'payroll' ? C.accent : C.surface, color: tab === 'payroll' ? '#fff' : C.inkMuted }}>الرواتب</button>
+        </div>
+      </div>
+      {tab === 'accounts'
+        ? <AccountsTab accounts={accounts} transactions={transactions} actions={actions} askConfirm={askConfirm} isManager={isManager} />
+        : <PayrollTab staff={staff} accounts={accounts} salaryPayments={salaryPayments} actions={actions} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Financial reports
 // ---------------------------------------------------------------------------
 function toDateInputValue(d) { return d.toISOString().slice(0, 10); }
 
-function FinancialReportsView({ accounts, transactions }) {
+function GeneralReportTab({ accounts, transactions, invoices, purchases }) {
   const today = new Date();
   const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
   const [fromDate, setFromDate] = useState(toDateInputValue(firstOfMonth));
@@ -1317,10 +1543,12 @@ function FinancialReportsView({ accounts, transactions }) {
 
   const sortedTx = inRange.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
+  const receivable = invoices.filter((i) => !i.voided).reduce((s, i) => s + Math.max(0, Number(i.amount) - invoicePaid(i)), 0);
+  const payable = purchases.reduce((s, p) => s + Math.max(0, Number(p.total_amount) - purchasePaid(p)), 0);
+
   return (
-    <div className="p-6 space-y-5">
-      <div className="flex items-center justify-between no-print flex-wrap gap-3">
-        <div className="text-2xl font-bold" style={{ color: C.ink }}>التقارير المالية</div>
+    <div className="space-y-5">
+      <div className="flex items-center justify-end no-print">
         <button onClick={() => window.print()} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>طباعة التقرير</button>
       </div>
 
@@ -1345,6 +1573,14 @@ function FinancialReportsView({ accounts, transactions }) {
           <StatCard label="إجمالي الإيرادات" value={SAR(totalIn)} />
           <StatCard label="إجمالي المصروفات" value={SAR(totalOut)} tone={totalOut ? 'warning' : undefined} />
           <StatCard label="صافي الفترة" value={SAR(net)} tone={net < 0 ? 'critical' : undefined} />
+        </div>
+
+        <div>
+          <div className="text-xs font-bold mb-2" style={{ color: C.inkMuted }}>لقطة مالية حالية (بغض النظر عن الفترة أعلاه)</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <StatCard label="مستحق من المرضى (فواتير غير مسدّدة)" value={SAR(receivable)} tone={receivable ? 'warning' : undefined} />
+            <StatCard label="مستحق للموردين (مشتريات غير مسدّدة)" value={SAR(payable)} tone={payable ? 'critical' : undefined} />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1403,6 +1639,156 @@ function FinancialReportsView({ accounts, transactions }) {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Referring-doctor commissions
+// ---------------------------------------------------------------------------
+function DoctorsCommissionTab({ orders, invoices, referringDoctors, commissionPayments, accounts, actions }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState({ name: '', phone: '', commissionType: 'percentage', commissionValue: '' });
+  const [payingName, setPayingName] = useState(null);
+  const [payForm, setPayForm] = useState({ amount: '', accountId: '', notes: '' });
+  const [error, setError] = useState('');
+
+  const byDoctor = {};
+  orders.filter((o) => o.status === 'completed' && o.referring_doctor).forEach((o) => {
+    const inv = invoices.find((i) => i.order_id === o.id);
+    const amount = inv && !inv.voided ? Number(inv.amount) : 0;
+    const key = o.referring_doctor;
+    if (!byDoctor[key]) byDoctor[key] = { name: key, orderCount: 0, totalBilling: 0 };
+    byDoctor[key].orderCount += 1;
+    byDoctor[key].totalBilling += amount;
+  });
+  referringDoctors.forEach((d) => { if (!byDoctor[d.name]) byDoctor[d.name] = { name: d.name, orderCount: 0, totalBilling: 0 }; });
+
+  const rows = Object.values(byDoctor).map((row) => {
+    const reg = referringDoctors.find((d) => d.name === row.name);
+    const owed = reg ? (reg.commission_type === 'percentage' ? row.totalBilling * Number(reg.commission_value) / 100 : row.orderCount * Number(reg.commission_value)) : 0;
+    const paid = commissionPayments.filter((c) => c.doctor_name === row.name).reduce((s, c) => s + Number(c.amount), 0);
+    return { ...row, registered: Boolean(reg), rate: reg, owed, paid, balance: owed - paid };
+  }).sort((a, b) => b.balance - a.balance);
+
+  const resetForm = () => { setForm({ name: '', phone: '', commissionType: 'percentage', commissionValue: '' }); setEditingId(null); setShowForm(false); setError(''); };
+  const startEdit = (d) => { setEditingId(d.id); setForm({ name: d.name, phone: d.phone || '', commissionType: d.commission_type, commissionValue: String(d.commission_value) }); setShowForm(true); setError(''); };
+  const startRegister = (name) => { setForm({ name, phone: '', commissionType: 'percentage', commissionValue: '' }); setEditingId(null); setShowForm(true); setError(''); };
+
+  const submit = async () => {
+    if (!form.name.trim()) { setError('اسم الطبيب مطلوب'); return; }
+    const value = Number(form.commissionValue);
+    if (isNaN(value) || value < 0) { setError('نسبة/قيمة العمولة يجب أن تكون رقماً موجباً'); return; }
+    const payload = { name: form.name.trim(), phone: form.phone.trim() || null, commission_type: form.commissionType, commission_value: value };
+    if (editingId) await actions.updateReferringDoctor(editingId, payload); else await actions.addReferringDoctor(payload);
+    resetForm();
+  };
+
+  const openPay = (row) => { setPayingName(row.name); setPayForm({ amount: row.balance > 0 ? String(row.balance) : '', accountId: accounts[0]?.id || '', notes: '' }); setError(''); };
+  const submitPay = async () => {
+    const amount = Number(payForm.amount);
+    if (isNaN(amount) || amount <= 0) { setError('أدخل مبلغاً صحيحاً'); return; }
+    if (!payForm.accountId) { setError('اختر الحساب الذي سيُصرف منه'); return; }
+    await actions.payDoctorCommission(payingName, amount, payForm.accountId, payForm.notes.trim());
+    setPayingName(null); setError('');
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center flex-wrap gap-2">
+        <div className="text-xs" style={{ color: C.inkMuted }}>تُحسب العمولة على الطلبات المكتملة المرتبطة باسم الطبيب المُدخل عند إنشاء الطلب.</div>
+        <button onClick={() => (showForm ? resetForm() : setShowForm(true))} className="px-3.5 py-2 rounded-lg text-sm font-bold whitespace-nowrap" style={{ background: C.accent, color: '#fff' }}>+ طبيب محوّل</button>
+      </div>
+      <ErrorNote>{error}</ErrorNote>
+      {showForm && (
+        <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Field label="اسم الطبيب"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+            <Field label="الهاتف (اختياري)"><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+            <Field label="نوع العمولة">
+              <select value={form.commissionType} onChange={(e) => setForm({ ...form, commissionType: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+                <option value="percentage">نسبة % من قيمة الفاتورة</option>
+                <option value="fixed">مبلغ ثابت لكل طلب</option>
+              </select>
+            </Field>
+            <Field label={form.commissionType === 'percentage' ? 'النسبة %' : 'المبلغ لكل طلب'}><input type="number" min="0" value={form.commissionValue} onChange={(e) => setForm({ ...form, commissionValue: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={submit} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>{editingId ? 'حفظ التعديلات' : 'حفظ'}</button>
+            <button onClick={resetForm} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>إلغاء</button>
+          </div>
+        </div>
+      )}
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الطبيب</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>عدد الطلبات</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>العمولة</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المستحق</th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.name} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>د. {row.name}</td>
+                <td className="px-4 py-3 font-mono whitespace-nowrap" style={{ color: C.inkMuted }}>{row.orderCount}</td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  {row.registered ? <span className="text-xs" style={{ color: C.inkMuted }}>{row.rate.commission_type === 'percentage' ? `${row.rate.commission_value}%` : SAR(row.rate.commission_value) + ' / طلب'}</span> : <Badge tone="warning">غير مسجّل</Badge>}
+                </td>
+                <td className="px-4 py-3 font-mono font-bold whitespace-nowrap" style={{ color: row.balance > 0 ? C.critical : C.inkMuted }}>{SAR(row.balance)}</td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <div className="flex items-center gap-3">
+                    {row.registered ? <button onClick={() => startEdit(row.rate)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button> : <button onClick={() => startRegister(row.name)} className="text-xs font-bold" style={{ color: C.accent }}>تسجيل العمولة</button>}
+                    {row.registered && row.orderCount === 0 && <button onClick={() => actions.deleteReferringDoctor(row.rate.id, row.name)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>}
+                    {row.balance > 0 && <button onClick={() => openPay(row)} className="text-xs font-bold" style={{ color: C.normal }}>صرف</button>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && <tr><td colSpan={5}><EmptyState text="لا يوجد أطباء محوّلون بعد" /></td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      {payingName && (
+        <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="font-bold text-sm" style={{ color: C.ink }}>صرف عمولة — د. {payingName}</div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <Field label="المبلغ"><input type="number" min="0" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+            <Field label="يُصرف من">
+              <select value={payForm.accountId} onChange={(e) => setPayForm({ ...payForm, accountId: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+                <option value="">اختر...</option>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </Field>
+            <Field label="ملاحظات (اختياري)"><input value={payForm.notes} onChange={(e) => setPayForm({ ...payForm, notes: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={submitPay} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>تأكيد الصرف</button>
+            <button onClick={() => setPayingName(null)} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>إلغاء</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FinancialReportsView({ accounts, transactions, invoices, purchases, orders, referringDoctors, commissionPayments, actions }) {
+  const [tab, setTab] = useState('general');
+  return (
+    <div className="p-6 space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="text-2xl font-bold" style={{ color: C.ink }}>التقارير المالية</div>
+        <div className="flex rounded-lg overflow-hidden no-print" style={{ border: `1px solid ${C.line}` }}>
+          <button onClick={() => setTab('general')} className="px-4 py-2 text-sm font-bold" style={{ background: tab === 'general' ? C.accent : C.surface, color: tab === 'general' ? '#fff' : C.inkMuted }}>التقرير العام</button>
+          <button onClick={() => setTab('doctors')} className="px-4 py-2 text-sm font-bold" style={{ background: tab === 'doctors' ? C.accent : C.surface, color: tab === 'doctors' ? '#fff' : C.inkMuted }}>عمولات الأطباء</button>
+        </div>
+      </div>
+      {tab === 'general'
+        ? <GeneralReportTab accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} />
+        : <DoctorsCommissionTab orders={orders} invoices={invoices} referringDoctors={referringDoctors} commissionPayments={commissionPayments} accounts={accounts} actions={actions} />}
     </div>
   );
 }
@@ -1806,6 +2192,9 @@ function AppShell({ session }) {
   const [purchases, setPurchases] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [referringDoctors, setReferringDoctors] = useState([]);
+  const [salaryPayments, setSalaryPayments] = useState([]);
+  const [commissionPayments, setCommissionPayments] = useState([]);
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [patientFilter, setPatientFilter] = useState(null);
   const [historyPatientId, setHistoryPatientId] = useState(null);
@@ -1820,7 +2209,7 @@ function AppShell({ session }) {
 
   const fetchAll = async () => {
     try {
-      const [pRes, cRes, oRes, invRes, invenRes, aRes, profRes, supRes, purRes, accRes, txRes, lsRes] = await Promise.all([
+      const [pRes, cRes, oRes, invRes, invenRes, aRes, profRes, supRes, purRes, accRes, txRes, lsRes, rdRes, spRes, cpRes] = await Promise.all([
         sb.from('patients').select('*').order('created_at', { ascending: false }),
         sb.from('catalog_tests').select('*').order('created_at'),
         sb.from('orders').select('*').order('created_at', { ascending: false }),
@@ -1833,6 +2222,9 @@ function AppShell({ session }) {
         sb.from('accounts').select('*').order('created_at'),
         sb.from('transactions').select('*').order('created_at', { ascending: false }).limit(500),
         sb.from('lab_settings').select('*').eq('id', true).maybeSingle(),
+        sb.from('referring_doctors').select('*').order('name'),
+        sb.from('salary_payments').select('*').order('created_at', { ascending: false }),
+        sb.from('doctor_commission_payments').select('*').order('created_at', { ascending: false }),
       ]);
       if (pRes.data) setPatients(pRes.data);
       if (cRes.data) setCatalog(cRes.data);
@@ -1850,6 +2242,9 @@ function AppShell({ session }) {
       if (accRes.data) setAccounts(accRes.data);
       if (txRes.data) setTransactions(txRes.data);
       if (lsRes.data) setLabSettings(lsRes.data);
+      if (rdRes.data) setReferringDoctors(rdRes.data);
+      if (spRes.data) setSalaryPayments(spRes.data);
+      if (cpRes.data) setCommissionPayments(cpRes.data);
       setSaveError(false);
     } catch (e) {
       setSaveError(true);
@@ -1871,13 +2266,16 @@ function AppShell({ session }) {
     updatePatient: async (id, p) => { await sb.from('patients').update(p).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل مريض', p_details: `تعديل: ${p.name}` }); fetchAll(); },
     deletePatient: async (id, name) => { await sb.from('patients').delete().eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف مريض', p_details: `حذف: ${name}` }); fetchAll(); },
 
-    addOrder: async (patientId, testIds) => {
+    addOrder: async (patientId, testIds, referringDoctor) => {
       const patient = patients.find((p) => p.id === patientId);
-      await sb.rpc('create_order', { p_patient_id: patientId, p_test_ids: testIds, p_user_name: displayName, p_patient_name: patient?.name || '' });
+      await sb.rpc('create_order', { p_patient_id: patientId, p_test_ids: testIds, p_user_name: displayName, p_patient_name: patient?.name || '', p_referring_doctor: referringDoctor || null });
       fetchAll();
     },
     cancelOrder: async (orderId, sampleId) => { await sb.rpc('cancel_order', { p_order_id: orderId, p_user_name: displayName, p_sample_id: sampleId }); fetchAll(); },
     completeOrder: async (orderId, results, hasCritical, sampleId) => { await sb.rpc('complete_order', { p_order_id: orderId, p_results: results, p_has_critical: hasCritical, p_user_name: displayName, p_sample_id: sampleId }); fetchAll(); },
+    submitResults: async (orderId, results, hasCritical, sampleId) => { await sb.rpc('submit_results', { p_order_id: orderId, p_results: results, p_has_critical: hasCritical, p_user_name: displayName, p_sample_id: sampleId }); fetchAll(); },
+    verifyResults: async (orderId, sampleId) => { await sb.rpc('verify_results', { p_order_id: orderId, p_user_name: displayName, p_sample_id: sampleId }); fetchAll(); },
+    rejectResults: async (orderId, sampleId, reason) => { await sb.rpc('reject_results', { p_order_id: orderId, p_user_name: displayName, p_sample_id: sampleId, p_reason: reason || null }); fetchAll(); },
 
     addPayment: async (invoiceId, amount, method, accountId) => { await sb.rpc('add_payment', { p_invoice_id: invoiceId, p_amount: amount, p_method: method, p_user_name: displayName, p_account_id: accountId || null }); fetchAll(); },
 
@@ -1909,6 +2307,14 @@ function AppShell({ session }) {
     updateStaffActive: async (id, name, isActive) => { await sb.from('profiles').update({ active: isActive }).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: isActive ? 'تفعيل حساب موظف' : 'تعطيل حساب موظف', p_details: name }); fetchAll(); },
     updateStaffName: async (id, name) => { await sb.from('profiles').update({ display_name: name }).eq('id', id); fetchAll(); },
     updateLabSettings: async (patch) => { await sb.from('lab_settings').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', true); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل بيانات المختبر', p_details: '' }); fetchAll(); },
+
+    updateStaffSalary: async (id, name, baseSalary) => { await sb.from('profiles').update({ base_salary: baseSalary }).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل الراتب الأساسي', p_details: name }); fetchAll(); },
+    paySalary: async (profileId, staffName, amount, accountId, period) => { await sb.rpc('pay_salary', { p_profile_id: profileId, p_staff_name: staffName, p_amount: amount, p_account_id: accountId, p_period: period || null, p_user_name: displayName }); fetchAll(); },
+
+    addReferringDoctor: async (doc) => { await sb.from('referring_doctors').insert(doc); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة طبيب محوّل', p_details: doc.name }); fetchAll(); },
+    updateReferringDoctor: async (id, doc) => { await sb.from('referring_doctors').update(doc).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل بيانات طبيب', p_details: doc.name }); fetchAll(); },
+    deleteReferringDoctor: async (id, name) => { await sb.from('referring_doctors').delete().eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف طبيب محوّل', p_details: name }); fetchAll(); },
+    payDoctorCommission: async (doctorName, amount, accountId, notes) => { await sb.rpc('pay_doctor_commission', { p_doctor_name: doctorName, p_amount: amount, p_account_id: accountId, p_user_name: displayName, p_notes: notes || null }); fetchAll(); },
   };
 
   const exportBackup = () => {
@@ -1967,8 +2373,8 @@ function AppShell({ session }) {
           {view === 'history' && <PatientHistoryView patient={historyPatient} orders={orders} catalog={catalog} setView={setView} />}
           {view === 'inventory' && <InventoryView inventory={inventory} catalog={catalog} actions={actions} askConfirm={askConfirm} />}
           {view === 'suppliers' && <SuppliersView suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
-          {view === 'treasury' && isManager && <TreasuryView accounts={accounts} transactions={transactions} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
-          {view === 'financial-reports' && isManager && <FinancialReportsView accounts={accounts} transactions={transactions} />}
+          {view === 'treasury' && isManager && <TreasuryView accounts={accounts} transactions={transactions} staff={staff} salaryPayments={salaryPayments} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
+          {view === 'financial-reports' && isManager && <FinancialReportsView accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} orders={orders} referringDoctors={referringDoctors} commissionPayments={commissionPayments} actions={actions} />}
           {view === 'billing' && <BillingView invoices={invoices} orders={orders} patients={patients} accounts={accounts} actions={actions} />}
           {view === 'audit' && <AuditLogView auditLog={auditLog} />}
           {view === 'settings' && <SettingsView catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} isManager={isManager} staff={staff} myId={session.user.id} labSettings={labSettings} />}
