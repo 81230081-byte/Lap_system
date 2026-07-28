@@ -94,6 +94,16 @@ function expiryStatus(dateStr) {
   if (days <= 30) return { level: 'soon', days };
   return { level: 'ok', days };
 }
+const CATEGORY_ORDER = ['Hematology (CBC)', 'Urinalysis', 'Stool Analysis', 'Liver Function Tests (LFT)', 'Kidney Function Tests (KFT)', 'Lipid Profile', 'Diabetes & Glucose', 'Thyroid Function', 'Electrolytes', 'Cardiac & Inflammation Markers', 'Hormones', 'Serology & Infectious Disease', 'Coagulation', 'Other'];
+function groupByCategory(tests) {
+  const map = {};
+  tests.forEach((t) => { const cat = t.category || 'Other'; (map[cat] = map[cat] || []).push(t); });
+  const cats = Object.keys(map).sort((a, b) => {
+    const ia = CATEGORY_ORDER.indexOf(a), ib = CATEGORY_ORDER.indexOf(b);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+  });
+  return cats.map((c) => [c, map[c]]);
+}
 function invoicePaid(inv) { return (inv.payments || []).reduce((s, p) => s + Number(p.amount), 0); }
 function invoiceStatus(inv) {
   if (inv.voided) return 'voided';
@@ -672,17 +682,28 @@ function OrdersView({ patients, catalog, orders, inventory, actions, setView, se
           </Field>
           <div>
             <div className="text-xs font-bold mb-2" style={{ color: C.inkMuted }}>الفحوصات المطلوبة</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {catalog.map((c) => {
-                const checked = selectedTests.includes(c.id);
-                return (
-                  <label key={c.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md cursor-pointer text-sm" style={{ background: checked ? C.accentSoft : C.bg, border: `1px solid ${checked ? C.accent : C.line}` }}>
-                    <span className="flex items-center gap-2"><input type="checkbox" checked={checked} onChange={() => toggleTest(c.id)} /><span style={{ color: C.ink }}>{c.name}</span></span>
-                    <span className="font-mono text-xs" style={{ color: C.inkMuted }}>{SAR(c.price)}</span>
-                  </label>
-                );
-              })}
-            </div>
+            {groupByCategory(catalog).map(([cat, tests]) => {
+              const catSelectedCount = tests.filter((c) => selectedTests.includes(c.id)).length;
+              return (
+                <div key={cat} className="mb-3">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-xs font-bold" style={{ color: C.accentDark }}>{cat}</span>
+                    {catSelectedCount > 0 && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: C.accentSoft, color: C.accentDark }}>{catSelectedCount}</span>}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {tests.map((c) => {
+                      const checked = selectedTests.includes(c.id);
+                      return (
+                        <label key={c.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md cursor-pointer text-sm" style={{ background: checked ? C.accentSoft : C.bg, border: `1px solid ${checked ? C.accent : C.line}` }}>
+                          <span className="flex items-center gap-2"><input type="checkbox" checked={checked} onChange={() => toggleTest(c.id)} /><span style={{ color: C.ink }}>{c.name}</span></span>
+                          <span className="font-mono text-xs" style={{ color: C.inkMuted }}>{SAR(c.price)}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
           {lowStockWarnings.length > 0 && <ErrorNote>تنبيه مخزون: {lowStockWarnings.map((w) => w.name).join('، ')} منخفض حالياً</ErrorNote>}
           <div className="flex items-center justify-between flex-wrap gap-3 pt-3" style={{ borderTop: `1px solid ${C.line}` }}>
@@ -1246,13 +1267,14 @@ function accountBalance(account, transactions) {
   return Number(account.opening_balance) + inSum - outSum;
 }
 
-function AccountsTab({ accounts, transactions, actions, askConfirm, isManager }) {
+function AccountsTab({ accounts, transactions, chartOfAccounts, actions, askConfirm, isManager }) {
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [accForm, setAccForm] = useState({ name: '', type: 'نقدي', bankName: '', accountNumber: '', openingBalance: '' });
   const [error, setError] = useState('');
   const [expandedAccountId, setExpandedAccountId] = useState(null);
-  const [txForm, setTxForm] = useState({ direction: 'in', amount: '', category: '', description: '' });
+  const [txForm, setTxForm] = useState({ direction: 'in', amount: '', category: '', description: '', coaId: '' });
+  const postableCoa = chartOfAccounts.filter((a) => a.type === 'revenue' || a.type === 'expense');
 
   const cashTotal = accounts.filter((a) => a.type === 'نقدي').reduce((s, a) => s + accountBalance(a, transactions), 0);
   const bankTotal = accounts.filter((a) => a.type === 'بنكي').reduce((s, a) => s + accountBalance(a, transactions), 0);
@@ -1279,12 +1301,13 @@ function AccountsTab({ accounts, transactions, actions, askConfirm, isManager })
     askConfirm({ title: 'حذف حساب', message: `هل تريد حذف "${a.name}"؟`, danger: true, onConfirm: () => actions.deleteAccount(a.id, a.name) });
   };
 
-  const openTx = (a) => { setExpandedAccountId(a.id === expandedAccountId ? null : a.id); setTxForm({ direction: 'in', amount: '', category: '', description: '' }); setError(''); };
+  const openTx = (a) => { setExpandedAccountId(a.id === expandedAccountId ? null : a.id); setTxForm({ direction: 'in', amount: '', category: '', description: '', coaId: '' }); setError(''); };
   const submitTx = async (a) => {
     const amount = Number(txForm.amount);
     if (isNaN(amount) || amount <= 0) { setError('أدخل مبلغاً صحيحاً أكبر من صفر'); return; }
     if (!txForm.category.trim()) { setError('أدخل تصنيف الحركة (مثلاً: إيجار، رواتب، إيداع رأس مال)'); return; }
-    await actions.addManualTransaction(a.id, txForm.direction, amount, txForm.category.trim(), txForm.description.trim());
+    if (!txForm.coaId) { setError('اختر الحساب من الشجرة المحاسبية (إيرادات أو مصروفات)'); return; }
+    await actions.addManualTransaction(a.id, txForm.direction, amount, txForm.category.trim(), txForm.description.trim(), txForm.coaId);
     setExpandedAccountId(null); setError('');
   };
 
@@ -1349,7 +1372,7 @@ function AccountsTab({ accounts, transactions, actions, askConfirm, isManager })
                 <div className="mt-3 pt-3 space-y-3" style={{ borderTop: `1px solid ${C.line}` }}>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 items-end">
                     <Field label="النوع">
-                      <select value={txForm.direction} onChange={(e) => setTxForm({ ...txForm, direction: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+                      <select value={txForm.direction} onChange={(e) => setTxForm({ ...txForm, direction: e.target.value, coaId: '' })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
                         <option value="in">إيداع (دخل)</option>
                         <option value="out">مصروف (خرج)</option>
                       </select>
@@ -1358,6 +1381,12 @@ function AccountsTab({ accounts, transactions, actions, askConfirm, isManager })
                     <Field label="التصنيف">
                       <input list="tx-categories-list" value={txForm.category} onChange={(e) => setTxForm({ ...txForm, category: e.target.value })} placeholder="إيجار، رواتب..." className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} />
                       <datalist id="tx-categories-list">{COMMON_TX_CATEGORIES.map((c) => <option key={c} value={c} />)}</datalist>
+                    </Field>
+                    <Field label="حساب الشجرة المحاسبية">
+                      <select value={txForm.coaId} onChange={(e) => setTxForm({ ...txForm, coaId: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+                        <option value="">اختر...</option>
+                        {postableCoa.filter((c) => c.type === (txForm.direction === 'in' ? 'revenue' : 'expense')).map((c) => <option key={c.id} value={c.id}>{c.code} — {c.name_ar}</option>)}
+                      </select>
                     </Field>
                     <Field label="ملاحظات (اختياري)"><input value={txForm.description} onChange={(e) => setTxForm({ ...txForm, description: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
                   </div>
@@ -1491,7 +1520,7 @@ function PayrollTab({ staff, accounts, salaryPayments, actions }) {
   );
 }
 
-function TreasuryView({ accounts, transactions, staff, salaryPayments, actions, askConfirm, isManager }) {
+function TreasuryView({ accounts, transactions, staff, salaryPayments, chartOfAccounts, actions, askConfirm, isManager }) {
   const [tab, setTab] = useState('accounts');
   return (
     <div className="p-6 space-y-5">
@@ -1503,7 +1532,7 @@ function TreasuryView({ accounts, transactions, staff, salaryPayments, actions, 
         </div>
       </div>
       {tab === 'accounts'
-        ? <AccountsTab accounts={accounts} transactions={transactions} actions={actions} askConfirm={askConfirm} isManager={isManager} />
+        ? <AccountsTab accounts={accounts} transactions={transactions} chartOfAccounts={chartOfAccounts} actions={actions} askConfirm={askConfirm} isManager={isManager} />
         : <PayrollTab staff={staff} accounts={accounts} salaryPayments={salaryPayments} actions={actions} />}
     </div>
   );
@@ -1775,20 +1804,610 @@ function DoctorsCommissionTab({ orders, invoices, referringDoctors, commissionPa
   );
 }
 
-function FinancialReportsView({ accounts, transactions, invoices, purchases, orders, referringDoctors, commissionPayments, actions }) {
+function FinancialReportsView({ accounts, transactions, invoices, purchases, orders, referringDoctors, commissionPayments, patients, suppliers, chartOfAccounts, journalLines, actions }) {
   const [tab, setTab] = useState('general');
+  const TABS = [
+    ['general', 'التقرير العام'],
+    ['doctors', 'عمولات الأطباء'],
+    ['customers', 'كشوفات حساب العملاء'],
+    ['suppliers-stmt', 'كشوفات حساب الموردين'],
+    ['purchases-report', 'تقرير المشتريات'],
+    ['ledger', 'ميزان المراجعة / بيان الدخل'],
+    ['balance-sheet', 'قائمة المركز المالي'],
+    ['coa', 'الشجرة المحاسبية'],
+  ];
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="text-2xl font-bold" style={{ color: C.ink }}>التقارير المالية</div>
-        <div className="flex rounded-lg overflow-hidden no-print" style={{ border: `1px solid ${C.line}` }}>
-          <button onClick={() => setTab('general')} className="px-4 py-2 text-sm font-bold" style={{ background: tab === 'general' ? C.accent : C.surface, color: tab === 'general' ? '#fff' : C.inkMuted }}>التقرير العام</button>
-          <button onClick={() => setTab('doctors')} className="px-4 py-2 text-sm font-bold" style={{ background: tab === 'doctors' ? C.accent : C.surface, color: tab === 'doctors' ? '#fff' : C.inkMuted }}>عمولات الأطباء</button>
+        <div className="flex flex-wrap rounded-lg overflow-hidden no-print" style={{ border: `1px solid ${C.line}` }}>
+          {TABS.map(([key, label]) => (
+            <button key={key} onClick={() => setTab(key)} className="px-4 py-2 text-sm font-bold" style={{ background: tab === key ? C.accent : C.surface, color: tab === key ? '#fff' : C.inkMuted }}>{label}</button>
+          ))}
         </div>
       </div>
-      {tab === 'general'
-        ? <GeneralReportTab accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} />
-        : <DoctorsCommissionTab orders={orders} invoices={invoices} referringDoctors={referringDoctors} commissionPayments={commissionPayments} accounts={accounts} actions={actions} />}
+      {tab === 'general' && <GeneralReportTab accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} />}
+      {tab === 'doctors' && <DoctorsCommissionTab orders={orders} invoices={invoices} referringDoctors={referringDoctors} commissionPayments={commissionPayments} accounts={accounts} actions={actions} />}
+      {tab === 'customers' && <CustomerStatementsTab patients={patients} orders={orders} invoices={invoices} />}
+      {tab === 'suppliers-stmt' && <SupplierStatementsTab suppliers={suppliers} purchases={purchases} />}
+      {tab === 'purchases-report' && <PurchasesReportTab purchases={purchases} suppliers={suppliers} />}
+      {tab === 'ledger' && <GeneralLedgerTab journalLines={journalLines} chartOfAccounts={chartOfAccounts} />}
+      {tab === 'balance-sheet' && <BalanceSheetTab journalLines={journalLines} chartOfAccounts={chartOfAccounts} accounts={accounts} />}
+      {tab === 'coa' && <ChartOfAccountsTab chartOfAccounts={chartOfAccounts} actions={actions} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// كشف حساب عميل (مريض)
+// ---------------------------------------------------------------------------
+function CustomerStatementsTab({ patients, orders, invoices }) {
+  const [patientId, setPatientId] = useState('');
+  const patient = patients.find((p) => p.id === patientId);
+
+  const patientOrderIds = new Set(orders.filter((o) => o.patient_id === patientId).map((o) => o.id));
+  const patientInvoices = invoices.filter((inv) => patientOrderIds.has(inv.order_id) && !inv.voided);
+
+  const rows = [];
+  patientInvoices.forEach((inv) => {
+    const order = orders.find((o) => o.id === inv.order_id);
+    rows.push({ date: inv.created_at, type: 'فاتورة', label: `فاتورة فحوصات — ${order?.sample_id || ''}`, debit: Number(inv.amount), credit: 0 });
+    (inv.payments || []).forEach((p) => {
+      rows.push({ date: p.created_at, type: 'دفعة', label: `دفعة (${p.method})`, debit: 0, credit: Number(p.amount) });
+    });
+  });
+  rows.sort((a, b) => new Date(a.date) - new Date(b.date));
+  let running = 0;
+  const rowsWithBalance = rows.map((r) => { running += r.debit - r.credit; return { ...r, balance: running }; });
+  const totalDebit = rows.reduce((s, r) => s + r.debit, 0);
+  const totalCredit = rows.reduce((s, r) => s + r.credit, 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3 no-print">
+        <Field label="اختر العميل (المريض)">
+          <select value={patientId} onChange={(e) => setPatientId(e.target.value)} className="w-64 px-3 py-2 rounded-md text-sm" style={inputStyle}>
+            <option value="">اختر مريضاً...</option>
+            {patients.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </Field>
+        {patientId && <button onClick={() => window.print()} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>طباعة</button>}
+      </div>
+
+      {!patientId ? <EmptyState text="اختر عميلاً لعرض كشف حسابه" /> : (
+        <div id="report-area" className="rounded-lg overflow-hidden" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="px-5 py-4" style={{ borderBottom: `1px solid ${C.line}` }}>
+            <div className="text-lg font-bold" style={{ color: C.ink }}>كشف حساب: {patient?.name}</div>
+            <div className="text-xs font-mono" style={{ color: C.inkMuted }}>{patient?.phone || ''}</div>
+          </div>
+          <table className="w-full text-sm">
+            <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+              <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>التاريخ</th>
+              <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>البيان</th>
+              <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>مدين (عليه)</th>
+              <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>دائن (له)</th>
+              <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>الرصيد</th>
+            </tr></thead>
+            <tbody>
+              {rowsWithBalance.map((r, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{fmtDate(r.date)}</td>
+                  <td className="px-4 py-2.5" style={{ color: C.ink }}>{r.label}</td>
+                  <td className="px-4 py-2.5 font-mono" style={{ color: C.critical }}>{r.debit ? SAR(r.debit) : '—'}</td>
+                  <td className="px-4 py-2.5 font-mono" style={{ color: C.normal }}>{r.credit ? SAR(r.credit) : '—'}</td>
+                  <td className="px-4 py-2.5 font-mono font-bold" style={{ color: C.ink }}>{SAR(r.balance)}</td>
+                </tr>
+              ))}
+              {rowsWithBalance.length === 0 && <tr><td colSpan={5}><EmptyState text="لا توجد حركات على هذا العميل" /></td></tr>}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop: `2px solid ${C.line}`, background: C.bg }}>
+                <td colSpan={2} className="px-4 py-3 font-bold" style={{ color: C.ink }}>الإجمالي</td>
+                <td className="px-4 py-3 font-mono font-bold" style={{ color: C.critical }}>{SAR(totalDebit)}</td>
+                <td className="px-4 py-3 font-mono font-bold" style={{ color: C.normal }}>{SAR(totalCredit)}</td>
+                <td className="px-4 py-3 font-mono font-bold" style={{ color: C.ink }}>{SAR(totalDebit - totalCredit)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// كشف حساب مورد
+// ---------------------------------------------------------------------------
+function SupplierStatementsTab({ suppliers, purchases }) {
+  const [supplierId, setSupplierId] = useState('');
+  const supplier = suppliers.find((s) => s.id === supplierId);
+  const supplierPurchases = purchases.filter((p) => p.supplier_id === supplierId);
+
+  const rows = [];
+  supplierPurchases.forEach((p) => {
+    rows.push({ date: p.created_at, label: `فاتورة شراء${p.invoice_no ? ' رقم ' + p.invoice_no : ''}`, credit: Number(p.total_amount), debit: 0 });
+    (p.purchase_payments || []).forEach((pay) => {
+      rows.push({ date: pay.created_at, label: `دفعة (${pay.method})`, credit: 0, debit: Number(pay.amount) });
+    });
+  });
+  rows.sort((a, b) => new Date(a.date) - new Date(b.date));
+  let running = 0;
+  const rowsWithBalance = rows.map((r) => { running += r.credit - r.debit; return { ...r, balance: running }; });
+  const totalDebit = rows.reduce((s, r) => s + r.debit, 0);
+  const totalCredit = rows.reduce((s, r) => s + r.credit, 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3 no-print">
+        <Field label="اختر المورد">
+          <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="w-64 px-3 py-2 rounded-md text-sm" style={inputStyle}>
+            <option value="">اختر مورداً...</option>
+            {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </Field>
+        {supplierId && <button onClick={() => window.print()} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>طباعة</button>}
+      </div>
+
+      {!supplierId ? <EmptyState text="اختر مورداً لعرض كشف حسابه" /> : (
+        <div id="report-area" className="rounded-lg overflow-hidden" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="px-5 py-4" style={{ borderBottom: `1px solid ${C.line}` }}>
+            <div className="text-lg font-bold" style={{ color: C.ink }}>كشف حساب: {supplier?.name}</div>
+            <div className="text-xs font-mono" style={{ color: C.inkMuted }}>{supplier?.phone || ''}</div>
+          </div>
+          <table className="w-full text-sm">
+            <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+              <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>التاريخ</th>
+              <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>البيان</th>
+              <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>مدين (دفعنا)</th>
+              <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>دائن (علينا)</th>
+              <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>الرصيد المستحق</th>
+            </tr></thead>
+            <tbody>
+              {rowsWithBalance.map((r, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{fmtDate(r.date)}</td>
+                  <td className="px-4 py-2.5" style={{ color: C.ink }}>{r.label}</td>
+                  <td className="px-4 py-2.5 font-mono" style={{ color: C.normal }}>{r.debit ? SAR(r.debit) : '—'}</td>
+                  <td className="px-4 py-2.5 font-mono" style={{ color: C.critical }}>{r.credit ? SAR(r.credit) : '—'}</td>
+                  <td className="px-4 py-2.5 font-mono font-bold" style={{ color: C.ink }}>{SAR(r.balance)}</td>
+                </tr>
+              ))}
+              {rowsWithBalance.length === 0 && <tr><td colSpan={5}><EmptyState text="لا توجد حركات مع هذا المورد" /></td></tr>}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop: `2px solid ${C.line}`, background: C.bg }}>
+                <td colSpan={2} className="px-4 py-3 font-bold" style={{ color: C.ink }}>الإجمالي</td>
+                <td className="px-4 py-3 font-mono font-bold" style={{ color: C.normal }}>{SAR(totalDebit)}</td>
+                <td className="px-4 py-3 font-mono font-bold" style={{ color: C.critical }}>{SAR(totalCredit)}</td>
+                <td className="px-4 py-3 font-mono font-bold" style={{ color: C.ink }}>{SAR(totalCredit - totalDebit)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// تقرير المشتريات
+// ---------------------------------------------------------------------------
+function PurchasesReportTab({ purchases, suppliers }) {
+  const [supplierFilter, setSupplierFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
+  let filtered = purchases;
+  if (supplierFilter) filtered = filtered.filter((p) => p.supplier_id === supplierFilter);
+  if (dateFrom) filtered = filtered.filter((p) => new Date(p.created_at) >= new Date(dateFrom));
+  if (dateTo) filtered = filtered.filter((p) => new Date(p.created_at) <= new Date(dateTo + 'T23:59:59'));
+
+  const totalAmount = filtered.reduce((s, p) => s + Number(p.total_amount), 0);
+  const totalPaid = filtered.reduce((s, p) => s + purchasePaid(p), 0);
+  const totalRemaining = totalAmount - totalPaid;
+
+  const bySupplier = {};
+  filtered.forEach((p) => {
+    const name = suppliers.find((s) => s.id === p.supplier_id)?.name || '—';
+    bySupplier[name] = (bySupplier[name] || 0) + Number(p.total_amount);
+  });
+
+  const byItem = {};
+  filtered.forEach((p) => {
+    (p.items || []).forEach((it) => {
+      const key = it.item_name || 'صنف';
+      if (!byItem[key]) byItem[key] = { qty: 0, cost: 0 };
+      byItem[key].qty += Number(it.quantity);
+      byItem[key].cost += Number(it.quantity) * Number(it.unit_cost);
+    });
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3 no-print">
+        <Field label="المورد">
+          <select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} className="px-3 py-2 rounded-md text-sm" style={inputStyle}>
+            <option value="">كل الموردين</option>
+            {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </Field>
+        <Field label="من تاريخ"><input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+        <Field label="إلى تاريخ"><input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <StatCard label="إجمالي المشتريات" value={SAR(totalAmount)} />
+        <StatCard label="المدفوع" value={SAR(totalPaid)} />
+        <StatCard label="المتبقي (مستحق للموردين)" value={SAR(totalRemaining)} tone={totalRemaining ? 'critical' : undefined} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="rounded-lg overflow-hidden" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="px-4 py-3 text-sm font-bold" style={{ borderBottom: `1px solid ${C.line}`, color: C.ink }}>حسب المورد</div>
+          <table className="w-full text-sm">
+            <tbody>
+              {Object.entries(bySupplier).sort((a, b) => b[1] - a[1]).map(([name, amt]) => (
+                <tr key={name} style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <td className="px-4 py-2" style={{ color: C.ink }}>{name}</td>
+                  <td className="px-4 py-2 font-mono text-left" style={{ color: C.ink }}>{SAR(amt)}</td>
+                </tr>
+              ))}
+              {Object.keys(bySupplier).length === 0 && <tr><td colSpan={2}><EmptyState text="لا توجد بيانات" /></td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <div className="rounded-lg overflow-hidden" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="px-4 py-3 text-sm font-bold" style={{ borderBottom: `1px solid ${C.line}`, color: C.ink }}>حسب الصنف</div>
+          <table className="w-full text-sm">
+            <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+              <th className="text-right px-4 py-2 font-bold" style={{ color: C.inkMuted }}>الصنف</th>
+              <th className="text-right px-4 py-2 font-bold" style={{ color: C.inkMuted }}>الكمية</th>
+              <th className="text-right px-4 py-2 font-bold" style={{ color: C.inkMuted }}>التكلفة</th>
+            </tr></thead>
+            <tbody>
+              {Object.entries(byItem).sort((a, b) => b[1].cost - a[1].cost).map(([name, v]) => (
+                <tr key={name} style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <td className="px-4 py-2" style={{ color: C.ink }}>{name}</td>
+                  <td className="px-4 py-2 font-mono" style={{ color: C.inkMuted }}>{v.qty}</td>
+                  <td className="px-4 py-2 font-mono" style={{ color: C.ink }}>{SAR(v.cost)}</td>
+                </tr>
+              ))}
+              {Object.keys(byItem).length === 0 && <tr><td colSpan={3}><EmptyState text="لا توجد بيانات" /></td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المورد</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>التاريخ</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>رقم الفاتورة</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الإجمالي</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المدفوع</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المتبقي</th>
+          </tr></thead>
+          <tbody>
+            {filtered.slice().reverse().map((p) => {
+              const paid = purchasePaid(p);
+              return (
+                <tr key={p.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <td className="px-4 py-2.5 font-bold whitespace-nowrap" style={{ color: C.ink }}>{suppliers.find((s) => s.id === p.supplier_id)?.name}</td>
+                  <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{fmtDate(p.created_at)}</td>
+                  <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{p.invoice_no || '—'}</td>
+                  <td className="px-4 py-2.5 font-mono whitespace-nowrap" style={{ color: C.ink }}>{SAR(p.total_amount)}</td>
+                  <td className="px-4 py-2.5 font-mono whitespace-nowrap" style={{ color: C.normal }}>{SAR(paid)}</td>
+                  <td className="px-4 py-2.5 font-mono whitespace-nowrap" style={{ color: paid < p.total_amount ? C.critical : C.inkMuted }}>{SAR(Math.max(0, p.total_amount - paid))}</td>
+                </tr>
+              );
+            })}
+            {filtered.length === 0 && <tr><td colSpan={6}><EmptyState text="لا توجد فواتير شراء مطابقة" /></td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ميزان المراجعة وبيان الدخل (مبني على القيود المرتبطة بالشجرة المحاسبية)
+// ---------------------------------------------------------------------------
+function GeneralLedgerTab({ journalLines, chartOfAccounts }) {
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [expandedCoa, setExpandedCoa] = useState(null);
+
+  let filtered = journalLines;
+  if (dateFrom) filtered = filtered.filter((l) => l.journal_entries?.entry_date >= dateFrom);
+  if (dateTo) filtered = filtered.filter((l) => l.journal_entries?.entry_date <= dateTo);
+
+  const postableCoa = chartOfAccounts.filter((a) => a.type === 'revenue' || a.type === 'expense');
+  const netByCoa = {};
+  postableCoa.forEach((a) => { netByCoa[a.id] = 0; });
+  filtered.forEach((l) => { if (netByCoa[l.coa_id] !== undefined) netByCoa[l.coa_id] += Number(l.credit) - Number(l.debit); });
+  // للإيرادات: دائن يزيد الحساب (موجب طبيعي). للمصروفات: مدين يزيد الحساب، لذا نعكس الإشارة لعرضه كرقم موجب مصروف.
+
+  const revenueAccounts = postableCoa.filter((a) => a.type === 'revenue');
+  const expenseAccounts = postableCoa.filter((a) => a.type === 'expense');
+  const totalRevenue = revenueAccounts.reduce((s, a) => s + netByCoa[a.id], 0);
+  const totalExpense = expenseAccounts.reduce((s, a) => s - netByCoa[a.id], 0);
+  const netResult = totalRevenue - totalExpense;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3 no-print">
+        <Field label="من تاريخ"><input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+        <Field label="إلى تاريخ"><input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+        <button onClick={() => window.print()} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>طباعة</button>
+      </div>
+
+      <div id="report-area" className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <StatCard label="إجمالي الإيرادات (مستحقة)" value={SAR(totalRevenue)} />
+          <StatCard label="إجمالي المصروفات" value={SAR(totalExpense)} />
+          <StatCard label="صافي النتيجة" value={SAR(netResult)} tone={netResult < 0 ? 'critical' : undefined} />
+        </div>
+
+        <div className="rounded-lg overflow-hidden" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="px-5 py-4" style={{ borderBottom: `1px solid ${C.line}` }}>
+            <div className="text-lg font-bold" style={{ color: C.ink }}>بيان الدخل (Income Statement) — أساس الاستحقاق</div>
+            <div className="text-xs" style={{ color: C.inkMuted }}>الإيراد يُسجَّل عند إصدار الفاتورة، والمصروف عند حدوثه — وليس عند حركة النقد فقط</div>
+          </div>
+          <table className="w-full text-sm">
+            <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+              <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>الرمز</th>
+              <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>الحساب</th>
+              <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>عدد القيود</th>
+              <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>الإجمالي</th>
+            </tr></thead>
+            <tbody>
+              <tr style={{ background: C.bg }}><td colSpan={4} className="px-4 py-2 text-xs font-bold" style={{ color: C.normal }}>الإيرادات</td></tr>
+              {revenueAccounts.map((a) => {
+                const lines = filtered.filter((l) => l.coa_id === a.id);
+                return (
+                  <React.Fragment key={a.id}>
+                    <tr style={{ borderBottom: `1px solid ${C.line}`, cursor: 'pointer' }} onClick={() => setExpandedCoa(expandedCoa === a.id ? null : a.id)}>
+                      <td className="px-4 py-2 font-mono" style={{ color: C.inkMuted }}>{a.code}</td>
+                      <td className="px-4 py-2" style={{ color: C.ink }}>{a.name_ar}</td>
+                      <td className="px-4 py-2 font-mono" style={{ color: C.inkMuted }}>{lines.length}</td>
+                      <td className="px-4 py-2 font-mono font-bold" style={{ color: C.normal }}>{SAR(netByCoa[a.id])}</td>
+                    </tr>
+                    {expandedCoa === a.id && lines.map((l) => (
+                      <tr key={l.id} style={{ background: C.bg }}>
+                        <td></td>
+                        <td className="px-4 py-1.5 text-xs" style={{ color: C.inkMuted }} colSpan={2}>{fmtDate(l.journal_entries?.entry_date)} — {l.journal_entries?.description}</td>
+                        <td className="px-4 py-1.5 font-mono text-xs" style={{ color: C.inkMuted }}>{SAR(Number(l.credit) - Number(l.debit))}</td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
+              <tr style={{ background: C.bg }}><td colSpan={4} className="px-4 py-2 text-xs font-bold" style={{ color: C.critical }}>المصروفات</td></tr>
+              {expenseAccounts.map((a) => {
+                const lines = filtered.filter((l) => l.coa_id === a.id);
+                return (
+                  <React.Fragment key={a.id}>
+                    <tr style={{ borderBottom: `1px solid ${C.line}`, cursor: 'pointer' }} onClick={() => setExpandedCoa(expandedCoa === a.id ? null : a.id)}>
+                      <td className="px-4 py-2 font-mono" style={{ color: C.inkMuted }}>{a.code}</td>
+                      <td className="px-4 py-2" style={{ color: C.ink }}>{a.name_ar}</td>
+                      <td className="px-4 py-2 font-mono" style={{ color: C.inkMuted }}>{lines.length}</td>
+                      <td className="px-4 py-2 font-mono font-bold" style={{ color: C.critical }}>{SAR(-netByCoa[a.id])}</td>
+                    </tr>
+                    {expandedCoa === a.id && lines.map((l) => (
+                      <tr key={l.id} style={{ background: C.bg }}>
+                        <td></td>
+                        <td className="px-4 py-1.5 text-xs" style={{ color: C.inkMuted }} colSpan={2}>{fmtDate(l.journal_entries?.entry_date)} — {l.journal_entries?.description}</td>
+                        <td className="px-4 py-1.5 font-mono text-xs" style={{ color: C.inkMuted }}>{SAR(Number(l.debit) - Number(l.credit))}</td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr style={{ borderTop: `2px solid ${C.line}`, background: C.bg }}>
+                <td colSpan={3} className="px-4 py-3 font-bold" style={{ color: C.ink }}>صافي النتيجة (إيرادات − مصروفات)</td>
+                <td className="px-4 py-3 font-mono font-bold" style={{ color: netResult < 0 ? C.critical : C.normal }}>{SAR(netResult)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// قائمة المركز المالي (Balance Sheet) — الأصول = الالتزامات + حقوق الملكية
+// ---------------------------------------------------------------------------
+function BalanceSheetTab({ journalLines, chartOfAccounts, accounts }) {
+  const [asOf, setAsOf] = useState('');
+  let filtered = journalLines;
+  if (asOf) filtered = filtered.filter((l) => l.journal_entries?.entry_date <= asOf);
+
+  // الرصيد الطبيعي: للأصول والمصروفات مدين موجب (debit-credit)، للالتزامات وحقوق الملكية والإيرادات دائن موجب (credit-debit)
+  const balanceOf = (coaId, type) => {
+    const lines = filtered.filter((l) => l.coa_id === coaId);
+    const debit = lines.reduce((s, l) => s + Number(l.debit), 0);
+    const credit = lines.reduce((s, l) => s + Number(l.credit), 0);
+    return (type === 'asset' || type === 'expense') ? debit - credit : credit - debit;
+  };
+
+  const assetAccounts = chartOfAccounts.filter((a) => a.type === 'asset' && (a.code === '1200' || a.code === '1300' || accounts.some((acc) => acc.coa_id === a.id)));
+  const liabilityAccounts = chartOfAccounts.filter((a) => a.type === 'liability');
+  const equityAccounts = chartOfAccounts.filter((a) => a.type === 'equity');
+
+  // صافي نتيجة الأعمال المتراكم (أرباح محتجزة) = إجمالي الإيرادات - إجمالي المصروفات حتى تاريخه
+  const revenueTotal = chartOfAccounts.filter((a) => a.type === 'revenue').reduce((s, a) => s + balanceOf(a.id, 'revenue'), 0);
+  const expenseTotal = chartOfAccounts.filter((a) => a.type === 'expense').reduce((s, a) => s + balanceOf(a.id, 'expense'), 0);
+  const retainedEarnings = revenueTotal - expenseTotal;
+
+  const totalAssets = assetAccounts.reduce((s, a) => s + balanceOf(a.id, 'asset'), 0);
+  const totalLiabilities = liabilityAccounts.reduce((s, a) => s + balanceOf(a.id, 'liability'), 0);
+  const totalEquity = equityAccounts.reduce((s, a) => s + balanceOf(a.id, 'equity'), 0) + retainedEarnings;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3 no-print">
+        <Field label="كما في تاريخ (اتركه فارغاً للحالة الآن)"><input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} className="px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+        <button onClick={() => window.print()} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>طباعة</button>
+      </div>
+
+      <div id="report-area" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="rounded-lg overflow-hidden" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="px-4 py-3 text-sm font-bold" style={{ borderBottom: `1px solid ${C.line}`, color: C.ink }}>الأصول</div>
+          <table className="w-full text-sm">
+            <tbody>
+              {assetAccounts.map((a) => (
+                <tr key={a.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <td className="px-4 py-2 font-mono text-xs" style={{ color: C.inkMuted }}>{a.code}</td>
+                  <td className="px-4 py-2" style={{ color: C.ink }}>{a.name_ar}</td>
+                  <td className="px-4 py-2 font-mono text-left" style={{ color: C.ink }}>{SAR(balanceOf(a.id, 'asset'))}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot><tr style={{ borderTop: `2px solid ${C.line}`, background: C.bg }}>
+              <td colSpan={2} className="px-4 py-3 font-bold" style={{ color: C.ink }}>إجمالي الأصول</td>
+              <td className="px-4 py-3 font-mono font-bold text-left" style={{ color: C.ink }}>{SAR(totalAssets)}</td>
+            </tr></tfoot>
+          </table>
+        </div>
+
+        <div className="space-y-4">
+          <div className="rounded-lg overflow-hidden" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+            <div className="px-4 py-3 text-sm font-bold" style={{ borderBottom: `1px solid ${C.line}`, color: C.ink }}>الالتزامات</div>
+            <table className="w-full text-sm">
+              <tbody>
+                {liabilityAccounts.map((a) => (
+                  <tr key={a.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <td className="px-4 py-2 font-mono text-xs" style={{ color: C.inkMuted }}>{a.code}</td>
+                    <td className="px-4 py-2" style={{ color: C.ink }}>{a.name_ar}</td>
+                    <td className="px-4 py-2 font-mono text-left" style={{ color: C.ink }}>{SAR(balanceOf(a.id, 'liability'))}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot><tr style={{ borderTop: `1px solid ${C.line}`, background: C.bg }}>
+                <td colSpan={2} className="px-4 py-2 font-bold text-sm" style={{ color: C.ink }}>إجمالي الالتزامات</td>
+                <td className="px-4 py-2 font-mono font-bold text-left" style={{ color: C.ink }}>{SAR(totalLiabilities)}</td>
+              </tr></tfoot>
+            </table>
+          </div>
+          <div className="rounded-lg overflow-hidden" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+            <div className="px-4 py-3 text-sm font-bold" style={{ borderBottom: `1px solid ${C.line}`, color: C.ink }}>حقوق الملكية</div>
+            <table className="w-full text-sm">
+              <tbody>
+                {equityAccounts.map((a) => (
+                  <tr key={a.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <td className="px-4 py-2 font-mono text-xs" style={{ color: C.inkMuted }}>{a.code}</td>
+                    <td className="px-4 py-2" style={{ color: C.ink }}>{a.name_ar}</td>
+                    <td className="px-4 py-2 font-mono text-left" style={{ color: C.ink }}>{SAR(balanceOf(a.id, 'equity'))}</td>
+                  </tr>
+                ))}
+                <tr style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <td className="px-4 py-2 font-mono text-xs" style={{ color: C.inkMuted }}>—</td>
+                  <td className="px-4 py-2" style={{ color: C.ink }}>الأرباح المحتجزة (صافي نتيجة الأعمال)</td>
+                  <td className="px-4 py-2 font-mono text-left" style={{ color: retainedEarnings < 0 ? C.critical : C.ink }}>{SAR(retainedEarnings)}</td>
+                </tr>
+              </tbody>
+              <tfoot><tr style={{ borderTop: `1px solid ${C.line}`, background: C.bg }}>
+                <td colSpan={2} className="px-4 py-2 font-bold text-sm" style={{ color: C.ink }}>إجمالي حقوق الملكية</td>
+                <td className="px-4 py-2 font-mono font-bold text-left" style={{ color: C.ink }}>{SAR(totalEquity)}</td>
+              </tr></tfoot>
+            </table>
+          </div>
+          <div className="rounded-lg p-4 flex items-center justify-between" style={{ background: totalAssets.toFixed(2) === (totalLiabilities + totalEquity).toFixed(2) ? C.accentSoft : '#FDECEC', border: `1px solid ${C.line}` }}>
+            <span className="text-sm font-bold" style={{ color: C.ink }}>الالتزامات + حقوق الملكية</span>
+            <span className="font-mono font-bold" style={{ color: C.ink }}>{SAR(totalLiabilities + totalEquity)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+const COA_TYPE_LABEL = { asset: 'أصول', liability: 'التزامات', equity: 'حقوق ملكية', revenue: 'إيرادات', expense: 'مصروفات' };
+function ChartOfAccountsTab({ chartOfAccounts, actions }) {
+  const blank = { code: '', name_ar: '', name_en: '', type: 'asset', parent_id: '' };
+  const [form, setForm] = useState(blank);
+  const [editingId, setEditingId] = useState(null);
+  const [error, setError] = useState('');
+
+  const resetForm = () => { setForm(blank); setEditingId(null); setError(''); };
+  const startEdit = (a) => { setEditingId(a.id); setForm({ code: a.code, name_ar: a.name_ar, name_en: a.name_en || '', type: a.type, parent_id: a.parent_id || '' }); setError(''); };
+
+  const submit = async () => {
+    if (!form.code.trim() || !form.name_ar.trim()) { setError('الرمز والاسم مطلوبان'); return; }
+    const payload = { code: form.code.trim(), name_ar: form.name_ar.trim(), name_en: form.name_en.trim() || null, type: form.type, parent_id: form.parent_id || null };
+    if (editingId) await actions.updateCoaAccount(editingId, payload); else await actions.addCoaAccount(payload);
+    resetForm();
+  };
+  const onDelete = (a) => {
+    if (chartOfAccounts.some((c) => c.parent_id === a.id)) { setError(`لا يمكن حذف "${a.name_ar}" — يحتوي على حسابات فرعية`); return; }
+    actions.deleteCoaAccount(a.id, a.name_ar);
+  };
+
+  const roots = chartOfAccounts.filter((a) => !a.parent_id).sort((x, y) => x.code.localeCompare(y.code));
+  const childrenOf = (id) => chartOfAccounts.filter((a) => a.parent_id === id).sort((x, y) => x.code.localeCompare(y.code));
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg p-4 space-y-3 no-print" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <Field label="الرمز"><input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+          <Field label="الاسم (عربي)"><input value={form.name_ar} onChange={(e) => setForm({ ...form, name_ar: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+          <Field label="الاسم (إنجليزي)"><input value={form.name_en} onChange={(e) => setForm({ ...form, name_en: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+          <Field label="النوع">
+            <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+              {Object.entries(COA_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </Field>
+          <Field label="الحساب الأب (اختياري)">
+            <select value={form.parent_id} onChange={(e) => setForm({ ...form, parent_id: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+              <option value="">— حساب رئيسي —</option>
+              {chartOfAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name_ar}</option>)}
+            </select>
+          </Field>
+        </div>
+        <ErrorNote>{error}</ErrorNote>
+        <div className="flex gap-2">
+          <button onClick={submit} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>{editingId ? 'حفظ التعديلات' : 'إضافة حساب'}</button>
+          {editingId && <button onClick={resetForm} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>إلغاء</button>}
+        </div>
+      </div>
+
+      <div className="rounded-lg overflow-hidden" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>الرمز</th>
+            <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>الاسم</th>
+            <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>النوع</th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+            {roots.map((root) => (
+              <React.Fragment key={root.id}>
+                <tr style={{ borderBottom: `1px solid ${C.line}`, background: C.bg }}>
+                  <td className="px-4 py-2.5 font-mono font-bold" style={{ color: C.ink }}>{root.code}</td>
+                  <td className="px-4 py-2.5 font-bold" style={{ color: C.ink }}>{root.name_ar}{root.name_en ? <span className="font-normal text-xs" style={{ color: C.inkMuted }}> — {root.name_en}</span> : ''}</td>
+                  <td className="px-4 py-2.5"><Badge tone="accent">{COA_TYPE_LABEL[root.type]}</Badge></td>
+                  <td className="px-4 py-2.5 whitespace-nowrap"><div className="flex items-center gap-3"><button onClick={() => startEdit(root)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button><button onClick={() => onDelete(root)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button></div></td>
+                </tr>
+                {childrenOf(root.id).map((child) => (
+                  <tr key={child.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <td className="px-4 py-2.5 font-mono pr-8" style={{ color: C.inkMuted }}>{child.code}</td>
+                    <td className="px-4 py-2.5 pr-8" style={{ color: C.ink }}>↳ {child.name_ar}{child.name_en ? <span className="text-xs" style={{ color: C.inkMuted }}> — {child.name_en}</span> : ''}</td>
+                    <td className="px-4 py-2.5"><Badge tone="accent">{COA_TYPE_LABEL[child.type]}</Badge></td>
+                    <td className="px-4 py-2.5 whitespace-nowrap"><div className="flex items-center gap-3"><button onClick={() => startEdit(child)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button><button onClick={() => onDelete(child)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button></div></td>
+                  </tr>
+                ))}
+              </React.Fragment>
+            ))}
+            {roots.length === 0 && <tr><td colSpan={4}><EmptyState text="لا توجد حسابات بعد" /></td></tr>}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -1940,7 +2559,8 @@ function AuditLogView({ auditLog }) {
 // Settings / catalog
 // ---------------------------------------------------------------------------
 function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager }) {
-  const blank = { name: '', unit: '', min: '', max: '', price: '', differentForFemale: false, minF: '', maxF: '', criticalLow: '', criticalHigh: '', consumesItemId: '', consumesQty: '1' };
+  const blank = { name: '', category: '', unit: '', min: '', max: '', price: '', differentForFemale: false, minF: '', maxF: '', criticalLow: '', criticalHigh: '', consumesItemId: '', consumesQty: '1' };
+  const existingCategories = [...new Set(catalog.map((c) => c.category || 'Other'))].sort();
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState('');
@@ -1949,7 +2569,7 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager }
   const startEdit = (t) => {
     setEditingId(t.id);
     setForm({
-      name: t.name, unit: t.unit || '', min: String(t.min), max: String(t.max), price: String(t.price),
+      name: t.name, category: t.category || 'Other', unit: t.unit || '', min: String(t.min), max: String(t.max), price: String(t.price),
       differentForFemale: t.min_female !== null && t.min_female !== undefined,
       minF: t.min_female !== null && t.min_female !== undefined ? String(t.min_female) : '',
       maxF: t.max_female !== null && t.max_female !== undefined ? String(t.max_female) : '',
@@ -1962,11 +2582,12 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager }
 
   const submit = async () => {
     if (!form.name.trim()) { setError('اسم الفحص مطلوب'); return; }
+    if (!form.category.trim()) { setError('فئة الفحص مطلوبة (مثال: Hematology (CBC))'); return; }
     const min = Number(form.min), max = Number(form.max), price = Number(form.price);
     if (isNaN(min) || isNaN(max) || min >= max) { setError('يجب أن يكون الحد الأدنى أصغر من الحد الأقصى'); return; }
     if (isNaN(price) || price < 0) { setError('السعر يجب أن يكون رقماً موجباً'); return; }
     const payload = {
-      name: form.name.trim(), unit: form.unit.trim(), min, max, price,
+      name: form.name.trim(), category: form.category.trim(), unit: form.unit.trim(), min, max, price,
       min_female: form.differentForFemale ? Number(form.minF || min) : null,
       max_female: form.differentForFemale ? Number(form.maxF || max) : null,
       critical_low: form.criticalLow !== '' ? Number(form.criticalLow) : null,
@@ -1989,6 +2610,10 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager }
       {isManager && <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <Field label="اسم الفحص"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+          <Field label="الفئة (Category)">
+            <input list="test-categories-list" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Hematology (CBC)..." className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} />
+            <datalist id="test-categories-list">{existingCategories.map((c) => <option key={c} value={c} />)}</datalist>
+          </Field>
           <Field label="الوحدة"><input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
           <Field label="الحد الأدنى"><input type="number" step="any" value={form.min} onChange={(e) => setForm({ ...form, min: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
           <Field label="الحد الأقصى"><input type="number" step="any" value={form.max} onChange={(e) => setForm({ ...form, max: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
@@ -2029,13 +2654,18 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager }
             <th></th>
           </tr></thead>
           <tbody>
-            {catalog.map((c) => (
-              <tr key={c.id} style={{ borderBottom: `1px solid ${C.line}` }}>
-                <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{c.name}</td>
-                <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{c.min}–{c.max} {c.unit}{c.min_female !== null && c.min_female !== undefined ? ' (حسب الجنس)' : ''}</td>
-                <td className="px-4 py-3 font-mono whitespace-nowrap" style={{ color: C.ink }}>{SAR(c.price)}</td>
-                <td className="px-4 py-3 whitespace-nowrap">{isManager && <div className="flex items-center gap-3"><button onClick={() => startEdit(c)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button><button onClick={() => onDelete(c)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button></div>}</td>
-              </tr>
+            {groupByCategory(catalog).map(([cat, tests]) => (
+              <React.Fragment key={cat}>
+                <tr style={{ background: C.bg }}><td colSpan={4} className="px-4 py-2 text-xs font-bold" style={{ color: C.accentDark }}>{cat} <span style={{ color: C.inkMuted, fontWeight: 400 }}>({tests.length})</span></td></tr>
+                {tests.map((c) => (
+                  <tr key={c.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{c.name}</td>
+                    <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{c.min}–{c.max} {c.unit}{c.min_female !== null && c.min_female !== undefined ? ' (حسب الجنس)' : ''}</td>
+                    <td className="px-4 py-3 font-mono whitespace-nowrap" style={{ color: C.ink }}>{SAR(c.price)}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{isManager && <div className="flex items-center gap-3"><button onClick={() => startEdit(c)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button><button onClick={() => onDelete(c)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button></div>}</td>
+                  </tr>
+                ))}
+              </React.Fragment>
             ))}
           </tbody>
         </table>
@@ -2195,6 +2825,8 @@ function AppShell({ session }) {
   const [referringDoctors, setReferringDoctors] = useState([]);
   const [salaryPayments, setSalaryPayments] = useState([]);
   const [commissionPayments, setCommissionPayments] = useState([]);
+  const [chartOfAccounts, setChartOfAccounts] = useState([]);
+  const [journalLines, setJournalLines] = useState([]);
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [patientFilter, setPatientFilter] = useState(null);
   const [historyPatientId, setHistoryPatientId] = useState(null);
@@ -2209,7 +2841,7 @@ function AppShell({ session }) {
 
   const fetchAll = async () => {
     try {
-      const [pRes, cRes, oRes, invRes, invenRes, aRes, profRes, supRes, purRes, accRes, txRes, lsRes, rdRes, spRes, cpRes] = await Promise.all([
+      const [pRes, cRes, oRes, invRes, invenRes, aRes, profRes, supRes, purRes, accRes, txRes, lsRes, rdRes, spRes, cpRes, coaRes, jlRes] = await Promise.all([
         sb.from('patients').select('*').order('created_at', { ascending: false }),
         sb.from('catalog_tests').select('*').order('created_at'),
         sb.from('orders').select('*').order('created_at', { ascending: false }),
@@ -2225,6 +2857,8 @@ function AppShell({ session }) {
         sb.from('referring_doctors').select('*').order('name'),
         sb.from('salary_payments').select('*').order('created_at', { ascending: false }),
         sb.from('doctor_commission_payments').select('*').order('created_at', { ascending: false }),
+        sb.from('chart_of_accounts').select('*').order('code'),
+        sb.from('journal_lines').select('*, journal_entries(entry_date, description, source, reference_id)').order('created_at', { ascending: false }).limit(2000),
       ]);
       if (pRes.data) setPatients(pRes.data);
       if (cRes.data) setCatalog(cRes.data);
@@ -2245,6 +2879,8 @@ function AppShell({ session }) {
       if (rdRes.data) setReferringDoctors(rdRes.data);
       if (spRes.data) setSalaryPayments(spRes.data);
       if (cpRes.data) setCommissionPayments(cpRes.data);
+      if (coaRes.data) setChartOfAccounts(coaRes.data);
+      if (jlRes.data) setJournalLines(jlRes.data);
       setSaveError(false);
     } catch (e) {
       setSaveError(true);
@@ -2272,7 +2908,6 @@ function AppShell({ session }) {
       fetchAll();
     },
     cancelOrder: async (orderId, sampleId) => { await sb.rpc('cancel_order', { p_order_id: orderId, p_user_name: displayName, p_sample_id: sampleId }); fetchAll(); },
-    completeOrder: async (orderId, results, hasCritical, sampleId) => { await sb.rpc('complete_order', { p_order_id: orderId, p_results: results, p_has_critical: hasCritical, p_user_name: displayName, p_sample_id: sampleId }); fetchAll(); },
     submitResults: async (orderId, results, hasCritical, sampleId) => { await sb.rpc('submit_results', { p_order_id: orderId, p_results: results, p_has_critical: hasCritical, p_user_name: displayName, p_sample_id: sampleId }); fetchAll(); },
     verifyResults: async (orderId, sampleId) => { await sb.rpc('verify_results', { p_order_id: orderId, p_user_name: displayName, p_sample_id: sampleId }); fetchAll(); },
     rejectResults: async (orderId, sampleId, reason) => { await sb.rpc('reject_results', { p_order_id: orderId, p_user_name: displayName, p_sample_id: sampleId, p_reason: reason || null }); fetchAll(); },
@@ -2301,7 +2936,11 @@ function AppShell({ session }) {
     addAccount: async (a) => { await sb.from('accounts').insert(a); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة حساب', p_details: a.name }); fetchAll(); },
     updateAccount: async (id, a) => { await sb.from('accounts').update(a).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل حساب', p_details: a.name }); fetchAll(); },
     deleteAccount: async (id, name) => { await sb.from('accounts').delete().eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف حساب', p_details: name }); fetchAll(); },
-    addManualTransaction: async (accountId, direction, amount, category, description) => { await sb.rpc('add_manual_transaction', { p_account_id: accountId, p_direction: direction, p_amount: amount, p_category: category, p_description: description || null, p_user_name: displayName }); fetchAll(); },
+
+    addCoaAccount: async (a) => { await sb.from('chart_of_accounts').insert(a); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة حساب بالشجرة المحاسبية', p_details: `${a.code} - ${a.name_ar}` }); fetchAll(); },
+    updateCoaAccount: async (id, a) => { await sb.from('chart_of_accounts').update(a).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل حساب بالشجرة المحاسبية', p_details: a.name_ar || '' }); fetchAll(); },
+    deleteCoaAccount: async (id, name) => { await sb.from('chart_of_accounts').delete().eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف حساب من الشجرة المحاسبية', p_details: name }); fetchAll(); },
+    addManualTransaction: async (accountId, direction, amount, category, description, coaId) => { await sb.rpc('add_manual_transaction', { p_account_id: accountId, p_direction: direction, p_amount: amount, p_category: category, p_description: description || null, p_user_name: displayName, p_coa_id: coaId || null }); fetchAll(); },
 
     updateStaffRole: async (id, name, newRole) => { await sb.from('profiles').update({ role: newRole }).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تغيير صلاحية موظف', p_details: `${name} → ${newRole}` }); fetchAll(); },
     updateStaffActive: async (id, name, isActive) => { await sb.from('profiles').update({ active: isActive }).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: isActive ? 'تفعيل حساب موظف' : 'تعطيل حساب موظف', p_details: name }); fetchAll(); },
@@ -2373,8 +3012,8 @@ function AppShell({ session }) {
           {view === 'history' && <PatientHistoryView patient={historyPatient} orders={orders} catalog={catalog} setView={setView} />}
           {view === 'inventory' && <InventoryView inventory={inventory} catalog={catalog} actions={actions} askConfirm={askConfirm} />}
           {view === 'suppliers' && <SuppliersView suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
-          {view === 'treasury' && isManager && <TreasuryView accounts={accounts} transactions={transactions} staff={staff} salaryPayments={salaryPayments} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
-          {view === 'financial-reports' && isManager && <FinancialReportsView accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} orders={orders} referringDoctors={referringDoctors} commissionPayments={commissionPayments} actions={actions} />}
+          {view === 'treasury' && isManager && <TreasuryView accounts={accounts} transactions={transactions} staff={staff} salaryPayments={salaryPayments} chartOfAccounts={chartOfAccounts} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
+          {view === 'financial-reports' && isManager && <FinancialReportsView accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} orders={orders} referringDoctors={referringDoctors} commissionPayments={commissionPayments} patients={patients} suppliers={suppliers} chartOfAccounts={chartOfAccounts} journalLines={journalLines} actions={actions} />}
           {view === 'billing' && <BillingView invoices={invoices} orders={orders} patients={patients} accounts={accounts} actions={actions} />}
           {view === 'audit' && <AuditLogView auditLog={auditLog} />}
           {view === 'settings' && <SettingsView catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} isManager={isManager} staff={staff} myId={session.user.id} labSettings={labSettings} />}
