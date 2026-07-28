@@ -94,7 +94,7 @@ function expiryStatus(dateStr) {
   if (days <= 30) return { level: 'soon', days };
   return { level: 'ok', days };
 }
-const CATEGORY_ORDER = ['Hematology (CBC)', 'Urinalysis', 'Stool Analysis', 'Liver Function Tests (LFT)', 'Kidney Function Tests (KFT)', 'Lipid Profile', 'Diabetes & Glucose', 'Thyroid Function', 'Electrolytes', 'Cardiac & Inflammation Markers', 'Hormones', 'Serology & Infectious Disease', 'Coagulation', 'Other'];
+const CATEGORY_ORDER = ['Hematology (CBC)', 'Urinalysis', 'Stool Analysis', 'Liver Function Tests (LFT)', 'Kidney Function Tests (KFT)', 'Lipid Profile', 'Diabetes & Glucose', 'Thyroid Function', 'Electrolytes', 'Iron Studies & Vitamins', 'Pancreatic Function', 'Cardiac & Inflammation Markers', 'Hormones', 'Tumor Markers', 'Immunology & Rheumatology', 'Serology & Infectious Disease', 'Coagulation', 'Other'];
 function groupByCategory(tests) {
   const map = {};
   tests.forEach((t) => { const cat = t.category || 'Other'; (map[cat] = map[cat] || []).push(t); });
@@ -142,6 +142,19 @@ function Flag({ value, min, max, critLow, critHigh }) {
   if (isLow) return <span className="text-xs font-bold" style={{ color: C.critical }}>منخفض</span>;
   if (isHigh) return <span className="text-xs font-bold" style={{ color: C.critical }}>مرتفع</span>;
   return <span className="text-xs font-bold" style={{ color: C.normal }}>طبيعي</span>;
+}
+// مؤشر حالة مخصص للتقرير المطبوع (يُسلَّم للمريض): يوضّح الاتجاه والأولوية بشكل يفهمه المختص
+// دون استخدام ألفاظ مقلقة مباشرة أمام المريض مثل "منخفض جداً" أو "خطير".
+function ReportFlag({ value, min, max, critLow, critHigh }) {
+  if (value === '' || value === undefined || value === null || isNaN(value)) return <span style={{ color: C.inkFaint }}>—</span>;
+  const isCritical = critLow !== undefined && critHigh !== undefined && (value < critLow || value > critHigh);
+  const isLow = value < min, isHigh = value > max;
+  if (isCritical) {
+    return <span className="inline-flex items-center gap-1 text-xs font-bold px-1.5 py-0.5 rounded" style={{ color: '#fff', background: C.criticalDeep }}>{isLow ? '⇓' : '⇑'} يستدعي مراجعة الطبيب</span>;
+  }
+  if (isLow) return <span className="inline-flex items-center gap-1 text-xs font-bold" style={{ color: C.critical }}>↓ خارج المعدل</span>;
+  if (isHigh) return <span className="inline-flex items-center gap-1 text-xs font-bold" style={{ color: C.critical }}>↑ خارج المعدل</span>;
+  return <span className="text-xs font-bold" style={{ color: C.normal }}>✓ ضمن المعدل</span>;
 }
 function StatCard({ label, value, tone }) {
   const toneColor = tone === 'critical' ? C.critical : tone === 'warning' ? C.warning : C.accent;
@@ -845,10 +858,19 @@ function ReportView({ order, patient, catalog, setView, labSettings }) {
         <button onClick={() => setView('orders')} className="text-sm font-bold" style={{ color: C.accent }}>‹ رجوع للطلبات</button>
         <button onClick={() => window.print()} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>طباعة التقرير</button>
       </div>
-      {order.has_critical && <div className="px-4 py-3 rounded-lg text-sm font-bold" style={{ background: C.criticalDeepSoft, color: C.criticalDeep }}>⚠ يحتوي هذا التقرير على قيمة حرجة — يوصى بالتواصل الفوري مع الطبيب المعالج</div>}
+      {order.has_critical && <div className="px-4 py-3 rounded-lg text-sm font-bold" style={{ background: C.criticalDeepSoft, color: C.criticalDeep }}>ℹ تحتوي بعض نتائج هذا التقرير على قيم تستدعي المراجعة — يُنصح بمراجعة الطبيب المختص في أقرب وقت</div>}
       <div id="report-area" className="rounded-lg p-5 md:p-8 overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <div className="flex items-center justify-between flex-wrap gap-2 pb-4 mb-4" style={{ borderBottom: `2px solid ${C.ink}` }}>
-          <div className="flex items-center gap-3"><img src={logoSrc} alt="شعار المختبر" style={{ height: 48, width: "auto" }} /><div><div className="text-xl font-bold" style={{ color: C.ink }}>{labName}</div><div className="text-xs" style={{ color: C.inkMuted }}>تقرير نتائج التحاليل المخبرية</div></div></div>
+          <div className="flex items-center gap-3">
+            <img src={logoSrc} alt="شعار المختبر" style={{ height: 48, width: "auto" }} />
+            <div>
+              <div className="text-xl font-bold" style={{ color: C.ink }}>{labName}</div>
+              <div className="text-xs" style={{ color: C.inkMuted }}>تقرير نتائج التحاليل المخبرية</div>
+              <div className="text-xs font-mono mt-0.5" style={{ color: C.inkMuted }}>
+                {[labSettings?.phone, labSettings?.email, labSettings?.address].filter(Boolean).join(' · ')}
+              </div>
+            </div>
+          </div>
           <div className="text-left text-xs font-mono" style={{ color: C.inkMuted }}>
             <div>رقم العينة: {order.sample_id}</div>
             <div>التاريخ: {fmtDate(order.created_at)}</div>
@@ -862,33 +884,45 @@ function ReportView({ order, patient, catalog, setView, labSettings }) {
           <div><span style={{ color: C.inkMuted }}>الجنس: </span><span className="font-bold" style={{ color: C.ink }}>{patient?.gender}</span></div>
           {order.referring_doctor && <div><span style={{ color: C.inkMuted }}>الطبيب المحوّل: </span><span className="font-bold" style={{ color: C.ink }}>د. {order.referring_doctor}</span></div>}
         </div>
-        <table className="w-full text-sm min-w-[560px]">
-          <thead><tr style={{ borderBottom: `1px solid ${C.ink}` }}>
-            <th className="text-right py-2 font-bold" style={{ color: C.ink }}>الفحص</th>
-            <th className="text-right py-2 font-bold" style={{ color: C.ink }}>النتيجة</th>
-            <th className="text-right py-2 font-bold" style={{ color: C.ink }}>المعدل الطبيعي</th>
-            <th className="text-right py-2 font-bold" style={{ color: C.ink }}>المؤشر</th>
-            <th className="text-right py-2 font-bold" style={{ color: C.ink }}>الحالة</th>
-          </tr></thead>
-          <tbody>
-            {tests.map((t) => {
-              const value = order.results[t.id];
-              const r = resolveTestRanges(t, patient);
-              const status = classifyValue(value, r);
-              const rowBg = status === 'critical' ? C.criticalDeepSoft : status === 'abnormal' ? C.criticalSoft : 'transparent';
-              return (
-                <tr key={t.id} style={{ borderBottom: `1px solid ${C.line}`, background: rowBg }}>
-                  <td className="py-2.5" style={{ color: C.ink }}>{t.name}</td>
-                  <td className="py-2.5 font-mono font-bold" style={{ color: status !== 'normal' ? C.critical : C.ink }}>{value} {t.unit}</td>
-                  <td className="py-2.5 font-mono text-xs" style={{ color: C.inkMuted }}>{r.min}–{r.max} {t.unit}</td>
-                  <td className="py-2.5 w-28"><RangeGauge value={value} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} /></td>
-                  <td className="py-2.5"><Flag value={value} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} /></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <div className="mt-8 pt-4 text-xs text-center" style={{ borderTop: `1px solid ${C.line}`, color: C.inkFaint }}>{labSettings?.report_footer || 'هذا التقرير صادر إلكترونياً من نظام إدارة المختبر ولا يغني عن استشارة الطبيب المعالج'}</div>
+
+        {groupByCategory(tests).map(([cat, catTests]) => (
+          <div key={cat} className="mb-6" style={{ breakInside: 'avoid' }}>
+            <div className="text-sm font-bold px-3 py-1.5 mb-1 rounded" style={{ background: C.accentSoft, color: C.accentDark }}>{cat}</div>
+            <table className="w-full text-sm min-w-[560px]">
+              <thead><tr style={{ borderBottom: `1px solid ${C.ink}` }}>
+                <th className="text-right py-2 font-bold" style={{ color: C.ink }}>الفحص</th>
+                <th className="text-right py-2 font-bold" style={{ color: C.ink }}>النتيجة</th>
+                <th className="text-right py-2 font-bold" style={{ color: C.ink }}>المعدل الطبيعي</th>
+                <th className="text-right py-2 font-bold" style={{ color: C.ink }}>المؤشر</th>
+                <th className="text-right py-2 font-bold" style={{ color: C.ink }}>الحالة</th>
+              </tr></thead>
+              <tbody>
+                {catTests.map((t) => {
+                  const value = order.results[t.id];
+                  const r = resolveTestRanges(t, patient);
+                  const status = classifyValue(value, r);
+                  const rowBg = status === 'critical' ? C.criticalDeepSoft : status === 'abnormal' ? C.criticalSoft : 'transparent';
+                  return (
+                    <tr key={t.id} style={{ borderBottom: `1px solid ${C.line}`, background: rowBg }}>
+                      <td className="py-2.5" style={{ color: C.ink }}>{t.name}</td>
+                      <td className="py-2.5 font-mono font-bold" style={{ color: status !== 'normal' ? C.critical : C.ink }}>{value} {t.unit}</td>
+                      <td className="py-2.5 font-mono text-xs" style={{ color: C.inkMuted }}>{r.min}–{r.max} {t.unit}</td>
+                      <td className="py-2.5 w-28"><RangeGauge value={value} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} /></td>
+                      <td className="py-2.5"><ReportFlag value={value} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ))}
+
+        <div className="mt-2 pt-3 text-[11px] flex flex-wrap gap-x-5 gap-y-1" style={{ borderTop: `1px solid ${C.line}`, color: C.inkFaint }}>
+          <span>✓ ضمن المعدل الطبيعي</span>
+          <span style={{ color: C.critical }}>↑ / ↓ خارج المعدل المرجعي</span>
+          <span style={{ color: C.criticalDeep }}>⇑ / ⇓ يستدعي مراجعة الطبيب</span>
+        </div>
+        <div className="mt-4 pt-4 text-xs text-center" style={{ borderTop: `1px solid ${C.line}`, color: C.inkFaint }}>{labSettings?.report_footer || 'هذا التقرير صادر إلكترونياً من نظام إدارة المختبر ولا يغني عن استشارة الطبيب المعالج'}</div>
       </div>
     </div>
   );
