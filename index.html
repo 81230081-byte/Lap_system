@@ -68,6 +68,18 @@ const LOGO_B64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASUAAADcCAYAAAA2
 const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('ar-EG-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
 const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString('ar-EG-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 const PHONE_RE = /^[\d\s+()-]{7,}$/;
+
+function friendlyError(error) {
+  if (!error) return 'حدث خطأ غير متوقع، حاول مرة أخرى';
+  const code = error.code || '';
+  const msg = error.message || '';
+  if (code === '42501' || /row-level security/i.test(msg)) return 'ليس لديك صلاحية لتنفيذ هذه العملية';
+  if (code === '23505') return 'هذا العنصر مسجّل مسبقاً';
+  if (code === '23503') return 'لا يمكن تنفيذ هذا — العنصر مرتبط ببيانات أخرى';
+  if (code === '23514') return 'القيمة المدخلة غير صالحة';
+  if (/failed to fetch|network/i.test(msg)) return 'تعذر الاتصال بالخادم — تحقق من الإنترنت';
+  return msg || 'فشلت العملية، حاول مرة أخرى';
+}
 const inputStyle = { border: `1px solid ${C.line}` };
 
 function resolveTestRanges(test, patient) {
@@ -191,6 +203,18 @@ function ConfirmDialog({ state, onCancel }) {
           <button onClick={onCancel} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ color: C.inkMuted, border: `1px solid ${C.line}` }}>إلغاء</button>
           <button onClick={() => { state.onConfirm(); onCancel(); }} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ background: state.danger ? C.critical : C.accent, color: '#fff' }}>{state.confirmLabel || 'تأكيد'}</button>
         </div>
+      </div>
+    </div>
+  );
+}
+function Toast({ toast, onDismiss }) {
+  if (!toast) return null;
+  const isError = toast.type === 'error';
+  return (
+    <div className="fixed top-4 inset-x-0 z-50 flex justify-center px-4 pointer-events-none">
+      <div className="pointer-events-auto max-w-md w-full rounded-lg px-4 py-3 shadow-lg text-sm font-bold flex items-start gap-3" style={{ background: isError ? C.criticalSoft : C.normalSoft, color: isError ? C.critical : C.normal, border: `1px solid ${isError ? C.critical : C.normal}` }}>
+        <span className="flex-1">{toast.message}</span>
+        <button onClick={onDismiss} className="font-bold leading-none" style={{ color: 'inherit' }}>×</button>
       </div>
     </div>
   );
@@ -931,7 +955,7 @@ function ReportView({ order, patient, catalog, setView, labSettings }) {
 // ---------------------------------------------------------------------------
 // Inventory
 // ---------------------------------------------------------------------------
-function InventoryView({ inventory, catalog, actions, askConfirm }) {
+function InventoryView({ inventory, catalog, actions, askConfirm, isManager }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ name: '', unit: '', quantity: '', threshold: '', expiry: '' });
@@ -961,9 +985,9 @@ function InventoryView({ inventory, catalog, actions, askConfirm }) {
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="text-2xl font-bold" style={{ color: C.ink }}>المخزون</div>
-        <button onClick={() => (showForm ? resetForm() : setShowForm(true))} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>+ صنف جديد</button>
+        {isManager && <button onClick={() => (showForm ? resetForm() : setShowForm(true))} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>+ صنف جديد</button>}
       </div>
-      {showForm && (
+      {showForm && isManager && (
         <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <Field label="اسم الصنف"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
@@ -997,7 +1021,9 @@ function InventoryView({ inventory, catalog, actions, askConfirm }) {
                 <tr key={item.id} style={{ borderBottom: `1px solid ${C.line}` }}>
                   <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{item.name}</td>
                   <td className="px-4 py-3 whitespace-nowrap">
-                    <input type="number" min="0" value={item.quantity} onChange={(e) => actions.setQuantity(item.id, item.name, Math.max(0, Number(e.target.value)))} className="w-20 px-2 py-1 rounded-md text-sm font-mono" style={inputStyle} />
+                    {isManager
+                      ? <input type="number" min="0" value={item.quantity} onChange={(e) => actions.setQuantity(item.id, item.name, Math.max(0, Number(e.target.value)))} className="w-20 px-2 py-1 rounded-md text-sm font-mono" style={inputStyle} />
+                      : <span className="font-mono font-bold" style={{ color: C.ink }}>{item.quantity}</span>}
                     <span className="text-xs" style={{ color: C.inkMuted }}> {item.unit}</span>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">{low ? <Badge tone="critical">منخفض</Badge> : <Badge tone="normal">متوفر</Badge>}</td>
@@ -1009,8 +1035,8 @@ function InventoryView({ inventory, catalog, actions, askConfirm }) {
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="flex items-center gap-3">
-                      <button onClick={() => startEdit(item)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>
-                      <button onClick={() => onDelete(item)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>
+                      {isManager && <button onClick={() => startEdit(item)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>}
+                      {isManager && <button onClick={() => onDelete(item)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>}
                     </div>
                   </td>
                 </tr>
@@ -2873,6 +2899,14 @@ function AppShell({ session }) {
   const askConfirm = (opts) => setConfirmState({ open: true, ...opts });
   const closeConfirm = () => setConfirmState(null);
 
+  const [toast, setToast] = useState(null);
+  const notify = (type, message) => setToast({ type, message, key: Date.now() });
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
   const fetchAll = async () => {
     try {
       const [pRes, cRes, oRes, invRes, invenRes, aRes, profRes, supRes, purRes, accRes, txRes, lsRes, rdRes, spRes, cpRes, coaRes, jlRes] = await Promise.all([
@@ -2932,62 +2966,234 @@ function AppShell({ session }) {
   }, []);
 
   const actions = {
-    addPatient: async (p) => { const { error } = await sb.from('patients').insert(p); if (!error) await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة مريض', p_details: `تسجيل: ${p.name}` }); fetchAll(); },
-    updatePatient: async (id, p) => { await sb.from('patients').update(p).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل مريض', p_details: `تعديل: ${p.name}` }); fetchAll(); },
-    deletePatient: async (id, name) => { await sb.from('patients').delete().eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف مريض', p_details: `حذف: ${name}` }); fetchAll(); },
+    addPatient: async (p) => {
+      const { error } = await sb.from('patients').insert(p);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة مريض', p_details: `تسجيل: ${p.name}` });
+      fetchAll();
+    },
+    updatePatient: async (id, p) => {
+      const { error } = await sb.from('patients').update(p).eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل مريض', p_details: `تعديل: ${p.name}` });
+      fetchAll();
+    },
+    deletePatient: async (id, name) => {
+      const { error } = await sb.from('patients').delete().eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف مريض', p_details: `حذف: ${name}` });
+      fetchAll();
+    },
 
     addOrder: async (patientId, testIds, referringDoctor) => {
       const patient = patients.find((p) => p.id === patientId);
-      await sb.rpc('create_order', { p_patient_id: patientId, p_test_ids: testIds, p_user_name: displayName, p_patient_name: patient?.name || '', p_referring_doctor: referringDoctor || null });
+      const { error } = await sb.rpc('create_order', { p_patient_id: patientId, p_test_ids: testIds, p_user_name: displayName, p_patient_name: patient?.name || '', p_referring_doctor: referringDoctor || null });
+      if (error) { notify('error', friendlyError(error)); throw error; }
       fetchAll();
     },
-    cancelOrder: async (orderId, sampleId) => { await sb.rpc('cancel_order', { p_order_id: orderId, p_user_name: displayName, p_sample_id: sampleId }); fetchAll(); },
-    submitResults: async (orderId, results, hasCritical, sampleId) => { await sb.rpc('submit_results', { p_order_id: orderId, p_results: results, p_has_critical: hasCritical, p_user_name: displayName, p_sample_id: sampleId }); fetchAll(); },
-    verifyResults: async (orderId, sampleId) => { await sb.rpc('verify_results', { p_order_id: orderId, p_user_name: displayName, p_sample_id: sampleId }); fetchAll(); },
-    rejectResults: async (orderId, sampleId, reason) => { await sb.rpc('reject_results', { p_order_id: orderId, p_user_name: displayName, p_sample_id: sampleId, p_reason: reason || null }); fetchAll(); },
+    cancelOrder: async (orderId, sampleId) => {
+      const { error } = await sb.rpc('cancel_order', { p_order_id: orderId, p_user_name: displayName, p_sample_id: sampleId });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll();
+    },
+    submitResults: async (orderId, results, hasCritical, sampleId) => {
+      const { error } = await sb.rpc('submit_results', { p_order_id: orderId, p_results: results, p_has_critical: hasCritical, p_user_name: displayName, p_sample_id: sampleId });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll();
+    },
+    verifyResults: async (orderId, sampleId) => {
+      const { error } = await sb.rpc('verify_results', { p_order_id: orderId, p_user_name: displayName, p_sample_id: sampleId });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll();
+    },
+    rejectResults: async (orderId, sampleId, reason) => {
+      const { error } = await sb.rpc('reject_results', { p_order_id: orderId, p_user_name: displayName, p_sample_id: sampleId, p_reason: reason || null });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll();
+    },
 
-    addPayment: async (invoiceId, amount, method, accountId) => { await sb.rpc('add_payment', { p_invoice_id: invoiceId, p_amount: amount, p_method: method, p_user_name: displayName, p_account_id: accountId || null }); fetchAll(); },
+    addPayment: async (invoiceId, amount, method, accountId) => {
+      const { error } = await sb.rpc('add_payment', { p_invoice_id: invoiceId, p_amount: amount, p_method: method, p_user_name: displayName, p_account_id: accountId || null });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll();
+    },
 
-    addInventory: async (item) => { await sb.from('inventory').insert(item); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة صنف مخزون', p_details: item.name }); fetchAll(); },
-    updateInventory: async (id, item) => { await sb.from('inventory').update(item).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل صنف مخزون', p_details: item.name }); fetchAll(); },
-    deleteInventory: async (id, name) => { await sb.from('inventory').delete().eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف صنف مخزون', p_details: name }); fetchAll(); },
-    setQuantity: async (id, name, qty) => { await sb.from('inventory').update({ quantity: qty }).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل يدوي للمخزون', p_details: `${name} → ${qty}` }); fetchAll(); },
+    addInventory: async (item) => {
+      const { error } = await sb.from('inventory').insert(item);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة صنف مخزون', p_details: item.name });
+      fetchAll();
+    },
+    updateInventory: async (id, item) => {
+      const { error } = await sb.from('inventory').update(item).eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل صنف مخزون', p_details: item.name });
+      fetchAll();
+    },
+    deleteInventory: async (id, name) => {
+      const { error } = await sb.from('inventory').delete().eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف صنف مخزون', p_details: name });
+      fetchAll();
+    },
+    setQuantity: async (id, name, qty) => {
+      const { error } = await sb.from('inventory').update({ quantity: qty }).eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل يدوي للمخزون', p_details: `${name} → ${qty}` });
+      fetchAll();
+    },
 
-    addTest: async (t) => { await sb.from('catalog_tests').insert(t); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة فحص', p_details: t.name }); fetchAll(); },
-    updateTest: async (id, t) => { await sb.from('catalog_tests').update(t).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل فحص', p_details: t.name }); fetchAll(); },
-    deleteTest: async (id, name) => { await sb.from('catalog_tests').delete().eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف فحص', p_details: name }); fetchAll(); },
+    addTest: async (t) => {
+      const { error } = await sb.from('catalog_tests').insert(t);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة فحص', p_details: t.name });
+      fetchAll();
+    },
+    updateTest: async (id, t) => {
+      const { error } = await sb.from('catalog_tests').update(t).eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل فحص', p_details: t.name });
+      fetchAll();
+    },
+    deleteTest: async (id, name) => {
+      const { error } = await sb.from('catalog_tests').delete().eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف فحص', p_details: name });
+      fetchAll();
+    },
 
-    addSupplier: async (s) => { await sb.from('suppliers').insert(s); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة مورد', p_details: s.name }); fetchAll(); },
-    updateSupplier: async (id, s) => { await sb.from('suppliers').update(s).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل مورد', p_details: s.name }); fetchAll(); },
-    deleteSupplier: async (id, name) => { await sb.from('suppliers').delete().eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف مورد', p_details: name }); fetchAll(); },
+    addSupplier: async (s) => {
+      const { error } = await sb.from('suppliers').insert(s);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة مورد', p_details: s.name });
+      fetchAll();
+    },
+    updateSupplier: async (id, s) => {
+      const { error } = await sb.from('suppliers').update(s).eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل مورد', p_details: s.name });
+      fetchAll();
+    },
+    deleteSupplier: async (id, name) => {
+      const { error } = await sb.from('suppliers').delete().eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف مورد', p_details: name });
+      fetchAll();
+    },
     addPurchase: async (supplierId, items, paymentType, invoiceNo, accountId) => {
       const supplier = suppliers.find((s) => s.id === supplierId);
-      await sb.rpc('create_purchase', { p_supplier_id: supplierId, p_items: items, p_payment_type: paymentType, p_invoice_no: invoiceNo || null, p_user_name: displayName, p_supplier_name: supplier?.name || '', p_account_id: accountId || null });
+      const { error } = await sb.rpc('create_purchase', { p_supplier_id: supplierId, p_items: items, p_payment_type: paymentType, p_invoice_no: invoiceNo || null, p_user_name: displayName, p_supplier_name: supplier?.name || '', p_account_id: accountId || null });
+      if (error) { notify('error', friendlyError(error)); throw error; }
       fetchAll();
     },
-    addPurchasePayment: async (purchaseId, amount, method, accountId) => { await sb.rpc('add_purchase_payment', { p_purchase_id: purchaseId, p_amount: amount, p_method: method, p_user_name: displayName, p_account_id: accountId || null }); fetchAll(); },
+    addPurchasePayment: async (purchaseId, amount, method, accountId) => {
+      const { error } = await sb.rpc('add_purchase_payment', { p_purchase_id: purchaseId, p_amount: amount, p_method: method, p_user_name: displayName, p_account_id: accountId || null });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll();
+    },
 
-    addAccount: async (a) => { await sb.from('accounts').insert(a); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة حساب', p_details: a.name }); fetchAll(); },
-    updateAccount: async (id, a) => { await sb.from('accounts').update(a).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل حساب', p_details: a.name }); fetchAll(); },
-    deleteAccount: async (id, name) => { await sb.from('accounts').delete().eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف حساب', p_details: name }); fetchAll(); },
+    addAccount: async (a) => {
+      const { error } = await sb.from('accounts').insert(a);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة حساب', p_details: a.name });
+      fetchAll();
+    },
+    updateAccount: async (id, a) => {
+      const { error } = await sb.from('accounts').update(a).eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل حساب', p_details: a.name });
+      fetchAll();
+    },
+    deleteAccount: async (id, name) => {
+      const { error } = await sb.from('accounts').delete().eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف حساب', p_details: name });
+      fetchAll();
+    },
 
-    addCoaAccount: async (a) => { await sb.from('chart_of_accounts').insert(a); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة حساب بالشجرة المحاسبية', p_details: `${a.code} - ${a.name_ar}` }); fetchAll(); },
-    updateCoaAccount: async (id, a) => { await sb.from('chart_of_accounts').update(a).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل حساب بالشجرة المحاسبية', p_details: a.name_ar || '' }); fetchAll(); },
-    deleteCoaAccount: async (id, name) => { await sb.from('chart_of_accounts').delete().eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف حساب من الشجرة المحاسبية', p_details: name }); fetchAll(); },
-    addManualTransaction: async (accountId, direction, amount, category, description, coaId) => { await sb.rpc('add_manual_transaction', { p_account_id: accountId, p_direction: direction, p_amount: amount, p_category: category, p_description: description || null, p_user_name: displayName, p_coa_id: coaId || null }); fetchAll(); },
+    addCoaAccount: async (a) => {
+      const { error } = await sb.from('chart_of_accounts').insert(a);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة حساب بالشجرة المحاسبية', p_details: `${a.code} - ${a.name_ar}` });
+      fetchAll();
+    },
+    updateCoaAccount: async (id, a) => {
+      const { error } = await sb.from('chart_of_accounts').update(a).eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل حساب بالشجرة المحاسبية', p_details: a.name_ar || '' });
+      fetchAll();
+    },
+    deleteCoaAccount: async (id, name) => {
+      const { error } = await sb.from('chart_of_accounts').delete().eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف حساب من الشجرة المحاسبية', p_details: name });
+      fetchAll();
+    },
+    addManualTransaction: async (accountId, direction, amount, category, description, coaId) => {
+      const { error } = await sb.rpc('add_manual_transaction', { p_account_id: accountId, p_direction: direction, p_amount: amount, p_category: category, p_description: description || null, p_user_name: displayName, p_coa_id: coaId || null });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll();
+    },
 
-    updateStaffRole: async (id, name, newRole) => { await sb.from('profiles').update({ role: newRole }).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تغيير صلاحية موظف', p_details: `${name} → ${newRole}` }); fetchAll(); },
-    updateStaffActive: async (id, name, isActive) => { await sb.from('profiles').update({ active: isActive }).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: isActive ? 'تفعيل حساب موظف' : 'تعطيل حساب موظف', p_details: name }); fetchAll(); },
-    updateStaffName: async (id, name) => { await sb.from('profiles').update({ display_name: name }).eq('id', id); fetchAll(); },
-    updateLabSettings: async (patch) => { await sb.from('lab_settings').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', true); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل بيانات المختبر', p_details: '' }); fetchAll(); },
+    updateStaffRole: async (id, name, newRole) => {
+      const { error } = await sb.from('profiles').update({ role: newRole }).eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تغيير صلاحية موظف', p_details: `${name} → ${newRole}` });
+      fetchAll();
+    },
+    updateStaffActive: async (id, name, isActive) => {
+      const { error } = await sb.from('profiles').update({ active: isActive }).eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: isActive ? 'تفعيل حساب موظف' : 'تعطيل حساب موظف', p_details: name });
+      fetchAll();
+    },
+    updateStaffName: async (id, name) => {
+      const { error } = await sb.from('profiles').update({ display_name: name }).eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll();
+    },
+    updateLabSettings: async (patch) => {
+      const { error } = await sb.from('lab_settings').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', true);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل بيانات المختبر', p_details: '' });
+      fetchAll();
+    },
 
-    updateStaffSalary: async (id, name, baseSalary) => { await sb.from('profiles').update({ base_salary: baseSalary }).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل الراتب الأساسي', p_details: name }); fetchAll(); },
-    paySalary: async (profileId, staffName, amount, accountId, period) => { await sb.rpc('pay_salary', { p_profile_id: profileId, p_staff_name: staffName, p_amount: amount, p_account_id: accountId, p_period: period || null, p_user_name: displayName }); fetchAll(); },
+    updateStaffSalary: async (id, name, baseSalary) => {
+      const { error } = await sb.from('profiles').update({ base_salary: baseSalary }).eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل الراتب الأساسي', p_details: name });
+      fetchAll();
+    },
+    paySalary: async (profileId, staffName, amount, accountId, period) => {
+      const { error } = await sb.rpc('pay_salary', { p_profile_id: profileId, p_staff_name: staffName, p_amount: amount, p_account_id: accountId, p_period: period || null, p_user_name: displayName });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll();
+    },
 
-    addReferringDoctor: async (doc) => { await sb.from('referring_doctors').insert(doc); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة طبيب محوّل', p_details: doc.name }); fetchAll(); },
-    updateReferringDoctor: async (id, doc) => { await sb.from('referring_doctors').update(doc).eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل بيانات طبيب', p_details: doc.name }); fetchAll(); },
-    deleteReferringDoctor: async (id, name) => { await sb.from('referring_doctors').delete().eq('id', id); await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف طبيب محوّل', p_details: name }); fetchAll(); },
-    payDoctorCommission: async (doctorName, amount, accountId, notes) => { await sb.rpc('pay_doctor_commission', { p_doctor_name: doctorName, p_amount: amount, p_account_id: accountId, p_user_name: displayName, p_notes: notes || null }); fetchAll(); },
+    addReferringDoctor: async (doc) => {
+      const { error } = await sb.from('referring_doctors').insert(doc);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة طبيب محوّل', p_details: doc.name });
+      fetchAll();
+    },
+    updateReferringDoctor: async (id, doc) => {
+      const { error } = await sb.from('referring_doctors').update(doc).eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل بيانات طبيب', p_details: doc.name });
+      fetchAll();
+    },
+    deleteReferringDoctor: async (id, name) => {
+      const { error } = await sb.from('referring_doctors').delete().eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف طبيب محوّل', p_details: name });
+      fetchAll();
+    },
+    payDoctorCommission: async (doctorName, amount, accountId, notes) => {
+      const { error } = await sb.rpc('pay_doctor_commission', { p_doctor_name: doctorName, p_amount: amount, p_account_id: accountId, p_user_name: displayName, p_notes: notes || null });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll();
+    },
   };
 
   const exportBackup = () => {
@@ -3044,7 +3250,7 @@ function AppShell({ session }) {
           {view === 'results' && <ResultsEntryView order={activeOrder} patient={activePatient} catalog={catalog} actions={actions} setView={setView} />}
           {view === 'report' && <ReportView order={activeOrder} patient={activePatient} catalog={catalog} setView={setView} labSettings={labSettings} />}
           {view === 'history' && <PatientHistoryView patient={historyPatient} orders={orders} catalog={catalog} setView={setView} />}
-          {view === 'inventory' && <InventoryView inventory={inventory} catalog={catalog} actions={actions} askConfirm={askConfirm} />}
+          {view === 'inventory' && <InventoryView inventory={inventory} catalog={catalog} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
           {view === 'suppliers' && <SuppliersView suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
           {view === 'treasury' && isManager && <TreasuryView accounts={accounts} transactions={transactions} staff={staff} salaryPayments={salaryPayments} chartOfAccounts={chartOfAccounts} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
           {view === 'financial-reports' && isManager && <FinancialReportsView accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} orders={orders} referringDoctors={referringDoctors} commissionPayments={commissionPayments} patients={patients} suppliers={suppliers} chartOfAccounts={chartOfAccounts} journalLines={journalLines} actions={actions} />}
@@ -3054,6 +3260,7 @@ function AppShell({ session }) {
         </main>
       </div>
       <ConfirmDialog state={confirmState} onCancel={closeConfirm} />
+      <Toast toast={toast} onDismiss={() => setToast(null)} />
     </div>
   );
 }
