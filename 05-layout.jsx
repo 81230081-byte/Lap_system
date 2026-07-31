@@ -5,9 +5,11 @@
 // ---------------------------------------------------------------------------
 const NAV = [
   { key: 'dashboard', label: 'لوحة التحكم' },
+  { key: 'appointments', label: 'المواعيد' },
   { key: 'patients', label: 'المرضى' },
   { key: 'orders', label: 'الطلبات والعينات' },
   { key: 'inventory', label: 'المخزون' },
+  { key: 'qc', label: 'ضبط الجودة' },
   { key: 'suppliers', label: 'الموردين والمشتريات' },
   { key: 'treasury', label: 'الصناديق والبنوك' },
   { key: 'financial-reports', label: 'التقارير المالية' },

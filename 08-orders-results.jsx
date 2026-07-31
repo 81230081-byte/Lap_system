@@ -296,6 +296,7 @@ function ReportView({ order, patient, catalog, setView, labSettings }) {
           <span style={{ color: C.criticalDeep }}>⇑ / ⇓ يستدعي مراجعة الطبيب</span>
         </div>
         <div className="mt-4 pt-4 text-xs text-center" style={{ borderTop: `1px solid ${C.line}`, color: C.inkFaint }}>{labSettings?.report_footer || 'هذا التقرير صادر إلكترونياً من نظام إدارة المختبر ولا يغني عن استشارة الطبيب المعالج'}</div>
+        {labSettings?.portal_url && <div className="mt-2 text-xs text-center font-mono" style={{ color: C.inkFaint }}>يمكن الاستعلام عن النتائج لاحقاً عبر: {labSettings.portal_url}</div>}
       </div>
     </div>
   );

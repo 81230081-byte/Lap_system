@@ -25,6 +25,8 @@ function AppShell({ session }) {
   const [commissionPayments, setCommissionPayments] = useState([]);
   const [chartOfAccounts, setChartOfAccounts] = useState([]);
   const [journalLines, setJournalLines] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  const [qc, setQc] = useState([]);
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [patientFilter, setPatientFilter] = useState(null);
   const [historyPatientId, setHistoryPatientId] = useState(null);
@@ -47,7 +49,7 @@ function AppShell({ session }) {
 
   const fetchAll = async () => {
     try {
-      const [pRes, cRes, oRes, invRes, invenRes, aRes, profRes, supRes, purRes, accRes, txRes, lsRes, rdRes, spRes, cpRes, coaRes, jlRes] = await Promise.all([
+      const [pRes, cRes, oRes, invRes, invenRes, aRes, profRes, supRes, purRes, accRes, txRes, lsRes, rdRes, spRes, cpRes, coaRes, jlRes, apptRes, qcRes] = await Promise.all([
         sb.from('patients').select('*').order('created_at', { ascending: false }),
         sb.from('catalog_tests').select('*').order('created_at'),
         sb.from('orders').select('*').order('created_at', { ascending: false }),
@@ -65,6 +67,8 @@ function AppShell({ session }) {
         sb.from('doctor_commission_payments').select('*').order('created_at', { ascending: false }),
         sb.from('chart_of_accounts').select('*').order('code'),
         sb.from('journal_lines').select('*, journal_entries(entry_date, description, source, reference_id)').order('created_at', { ascending: false }).limit(2000),
+        sb.from('appointments').select('*').order('scheduled_at', { ascending: true }).limit(500),
+        sb.from('quality_control').select('*').order('created_at', { ascending: false }).limit(500),
       ]);
       if (pRes.data) setPatients(pRes.data);
       if (cRes.data) setCatalog(cRes.data);
@@ -87,6 +91,8 @@ function AppShell({ session }) {
       if (cpRes.data) setCommissionPayments(cpRes.data);
       if (coaRes.data) setChartOfAccounts(coaRes.data);
       if (jlRes.data) setJournalLines(jlRes.data);
+      if (apptRes.data) setAppointments(apptRes.data);
+      if (qcRes.data) setQc(qcRes.data);
       setSaveError(false);
     } catch (e) {
       setSaveError(true);
@@ -332,10 +338,42 @@ function AppShell({ session }) {
       if (error) { notify('error', friendlyError(error)); throw error; }
       fetchAll();
     },
+
+    addAppointment: async (appt) => {
+      const { error } = await sb.from('appointments').insert({ ...appt, created_by: session.user.id });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إضافة موعد', p_details: `${appt.patient_name} — ${fmtDateTime(appt.scheduled_at)}` });
+      fetchAll();
+    },
+    updateAppointment: async (id, patch, label) => {
+      const { error } = await sb.from('appointments').update(patch).eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل موعد', p_details: label || '' });
+      fetchAll();
+    },
+    deleteAppointment: async (id, label) => {
+      const { error } = await sb.from('appointments').delete().eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف موعد', p_details: label || '' });
+      fetchAll();
+    },
+
+    addQualityCheck: async (check) => {
+      const { error } = await sb.from('quality_control').insert(check);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تسجيل فحص جودة', p_details: `${check.item_name} — ${check.passed ? 'ناجح' : 'فاشل'}` });
+      fetchAll();
+    },
+    deleteQualityCheck: async (id, label) => {
+      const { error } = await sb.from('quality_control').delete().eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف فحص جودة', p_details: label || '' });
+      fetchAll();
+    },
   };
 
   const exportBackup = () => {
-    const payload = { exportedAt: new Date().toISOString(), patients, catalog, orders, invoices, inventory, auditLog, suppliers, purchases, accounts, transactions };
+    const payload = { exportedAt: new Date().toISOString(), patients, catalog, orders, invoices, inventory, auditLog, suppliers, purchases, accounts, transactions, appointments, qc };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -383,6 +421,8 @@ function AppShell({ session }) {
         </div>
         <main className="flex-1 overflow-y-auto">
           {view === 'dashboard' && <Dashboard data={{ patients, catalog, orders, invoices, inventory, auditLog }} setView={setView} setActiveOrderId={setActiveOrderId} />}
+          {view === 'appointments' && <AppointmentsView appointments={appointments} patients={patients} actions={actions} askConfirm={askConfirm} isManager={isManager} onCreateOrder={goToPatientOrders} />}
+          {view === 'qc' && <QCView qc={qc} displayName={displayName} actions={actions} isManager={isManager} askConfirm={askConfirm} />}
           {view === 'patients' && <PatientsView patients={patients} orders={orders} actions={actions} askConfirm={askConfirm} onViewOrders={goToPatientOrders} onViewHistory={goToPatientHistory} isManager={isManager} />}
           {view === 'orders' && <OrdersView patients={patients} catalog={catalog} orders={orders} inventory={inventory} actions={actions} setView={setView} setActiveOrderId={setActiveOrderId} filterPatientId={patientFilter} clearFilter={() => setPatientFilter(null)} askConfirm={askConfirm} isManager={isManager} />}
           {view === 'results' && <ResultsEntryView order={activeOrder} patient={activePatient} catalog={catalog} actions={actions} setView={setView} />}

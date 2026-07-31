@@ -121,7 +121,7 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager }
 // Lab info tab (general settings)
 // ---------------------------------------------------------------------------
 function LabInfoTab({ labSettings, actions, isManager }) {
-  const blank = { name: '', phone: '', email: '', address: '', report_footer: '', logo_b64: '' };
+  const blank = { name: '', phone: '', email: '', address: '', report_footer: '', logo_b64: '', portal_url: '' };
   const [form, setForm] = useState(blank);
   const [saved, setSaved] = useState(false);
 
@@ -129,6 +129,7 @@ function LabInfoTab({ labSettings, actions, isManager }) {
     setForm({
       name: labSettings?.name || '', phone: labSettings?.phone || '', email: labSettings?.email || '',
       address: labSettings?.address || '', report_footer: labSettings?.report_footer || '', logo_b64: labSettings?.logo_b64 || '',
+      portal_url: labSettings?.portal_url || '',
     });
   }, [labSettings]);
 
@@ -136,6 +137,7 @@ function LabInfoTab({ labSettings, actions, isManager }) {
     await actions.updateLabSettings({
       name: form.name.trim() || 'مختبر الشموخ', phone: form.phone.trim() || null, email: form.email.trim() || null,
       address: form.address.trim() || null, report_footer: form.report_footer.trim() || null, logo_b64: form.logo_b64.trim() || null,
+      portal_url: form.portal_url.trim() || null,
     });
     setSaved(true); setTimeout(() => setSaved(false), 2000);
   };
@@ -149,6 +151,7 @@ function LabInfoTab({ labSettings, actions, isManager }) {
         <Field label="العنوان"><input disabled={!isManager} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
       </div>
       <Field label="ملاحظة أسفل التقرير المطبوع (اختياري)"><input disabled={!isManager} value={form.report_footer} onChange={(e) => setForm({ ...form, report_footer: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+      <Field label="رابط بوابة استعلام المريض عن نتيجته (اختياري — يظهر أسفل التقرير المطبوع إن أُدخل)"><input disabled={!isManager} value={form.portal_url} onChange={(e) => setForm({ ...form, portal_url: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} placeholder="https://.../portal.html" /></Field>
       {isManager && (
         <Field label="شعار المختبر (الصق Base64 أو رابط صورة — اتركه فارغاً لاستخدام الشعار الافتراضي)">
           <textarea value={form.logo_b64} onChange={(e) => setForm({ ...form, logo_b64: e.target.value })} rows={2} className="w-full px-3 py-2 rounded-md text-xs font-mono" style={inputStyle} placeholder="data:image/png;base64,... أو https://..." />
