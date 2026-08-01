@@ -3,62 +3,84 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>مختبر الشموخ الطبي</title>
+  <title>نظام إدارة مختبر الشموخ الطبي</title>
 
-  <!-- 1. مكتبة التنسيقات Tailwind CSS المبنية -->
+  <!-- التنسيقات والمكتبات الأساسية -->
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet" />
-
-  <!-- 2. مكتبات React و ReactDOM -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-
-  <!-- 3. محول الأكواد Babel لتشغيل JSX داخل المتصفح -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-  <!-- 4. سكريبت التقاط الأخطاء البرمجية وعرضها مباشرة على الشاشة -->
-  <script>
-    window.addEventListener('error', function (e) {
-      var box = document.getElementById('debug-box');
-      if (box) {
-        box.style.display = 'block';
-        box.innerHTML = '<b style="color:red">تفاصيل الخطأ الدقيقة:</b><br><br>' +
-          '<b>الرسالة:</b> ' + (e.message || 'Script Error') + '<br>' +
-          '<b>الملف:</b> ' + (e.filename || 'غير معروف') + '<br>' +
-          '<b>السطر:</b> ' + (e.lineno || 0) + ' | <b>العمود:</b> ' + (e.colno || 0);
-      }
-    });
-  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body class="bg-gray-100 text-gray-900 min-h-screen">
 
-  <!-- مربع كشف الأخطاء (يظهر فقط إذا حدثت مشكلة) -->
-  <div id="debug-box" style="display:none; background:#fee2e2; color:#991b1b; padding:15px; margin:15px; border-radius:8px; border:2px solid #ef4444; font-family:monospace; direction:ltr; text-align:left;"></div>
+  <!-- شاشة تنبيه الأخطاء -->
+  <div id="debug-box" style="display:none;" class="m-4 p-4 bg-red-100 border-2 border-red-500 text-red-800 rounded-lg text-left font-mono text-sm dir-ltr"></div>
 
-  <!-- مكان تشغيل واجهة النظام -->
+  <!-- مكان عرض التطبيق -->
   <div id="root"></div>
 
-  <!-- 5. استدعاء كافة ملفات المشروع بالترتيب الصحيح -->
-  <script type="text/babel" src="01-config.js"></script>
-  <script type="text/babel" src="02-helpers.js"></script>
-  <script type="text/babel" src="03-ui-kit.jsx"></script>
-  <script type="text/babel" src="04-login.jsx"></script>
-  <script type="text/babel" src="05-layout.jsx"></script>
-  <script type="text/babel" src="06-dashboard.jsx"></script>
-  <script type="text/babel" src="07-patients.jsx"></script>
-  <script type="text/babel" src="08-orders-results.jsx"></script>
-  <script type="text/babel" src="09-inventory.jsx"></script>
-  <script type="text/babel" src="10-suppliers-purchases.jsx"></script>
-  <script type="text/babel" src="11-treasury.jsx"></script>
-  <script type="text/babel" src="12-financial-reports.jsx"></script>
-  <script type="text/babel" src="13-ledger-and-coa.jsx"></script>
-  <script type="text/babel" src="14-billing.jsx"></script>
-  <script type="text/babel" src="15-audit-log.jsx"></script>
-  <script type="text/babel" src="16-settings.jsx"></script>
-  <script type="text/babel" src="17-app-shell.jsx"></script>
-  <script type="text/babel" src="19-appointments.jsx"></script>
-  <script type="text/babel" src="21-quality-control.jsx"></script>
-  
-  <!-- ملف التشغيل الرئيسي يتم استدعاؤه في النهاية -->
-  <script type="text/babel" src="20-main.jsx"></script>
+  <!-- سكريبت الدمج والتشغيل الموحد -->
+  <script>
+    async function launchApp() {
+      // قائمة كافة ملفات النظام بالترتيب الصحيح
+      const files = [
+        '01-config.js',
+        '02-helpers.js',
+        '03-ui-kit.jsx',
+        '04-login.jsx',
+        '05-layout.jsx',
+        '06-dashboard.jsx',
+        '07-patients.jsx',
+        '08-orders-results.jsx',
+        '09-inventory.jsx',
+        '10-suppliers-purchases.jsx',
+        '11-treasury.jsx',
+        '12-financial-reports.jsx',
+        '13-ledger-and-coa.jsx',
+        '14-billing.jsx',
+        '15-audit-log.jsx',
+        '16-settings.jsx',
+        '17-app-shell.jsx',
+        '19-appointments.jsx',
+        '21-quality-control.jsx',
+        '20-main.jsx' // يجب أن يكون الملف الرئيسي في النهاية
+      ];
+
+      const debugBox = document.getElementById('debug-box');
+
+      try {
+        let combinedCode = '';
+
+        // جلب وقراءة كافة الملفات
+        for (const file of files) {
+          const response = await fetch('./' + file);
+          if (!response.ok) {
+            throw new Error(`تعذر تحميل الملف: ${file} (رمز الخطأ: ${response.status})`);
+          }
+          const text = await response.text();
+          combinedCode += `\n/* --- File: ${file} --- */\n` + text;
+        }
+
+        // تحويل الكود المدمج عبر Babel
+        const transpiledCode = Babel.transform(combinedCode, {
+          presets: ['react']
+        }).code;
+
+        // تنفيذ الكود داخل المتصفح
+        const scriptElement = document.createElement('script');
+        scriptElement.text = transpiledCode;
+        document.body.appendChild(scriptElement);
+
+      } catch (err) {
+        debugBox.style.display = 'block';
+        debugBox.innerHTML = `<b style="color:red">فشل تشغيل النظام:</b><br><br>${err.message}`;
+      }
+    }
+
+    // بدء التشغيل عند اكتمال تحميل الصفحة
+    window.addEventListener('DOMContentLoaded', launchApp);
+  </script>
 </body>
 </html>
