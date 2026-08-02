@@ -13,6 +13,16 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- تنسيقات الطباعة: تُخفي عناصر التحكم (no-print) وتُظهر منطقة التقرير فقط عند الطباعة -->
+  <style>
+    @media print {
+      .no-print { display: none !important; }
+      body * { visibility: hidden; }
+      #report-area, #report-area * { visibility: visible; }
+      #report-area { position: absolute; top: 0; right: 0; left: 0; width: 100%; border: none !important; }
+    }
+  </style>
 </head>
 <body class="bg-gray-100 text-gray-900 min-h-screen">
 
