@@ -232,7 +232,7 @@ function ReportView({ order, patient, catalog, setView, labSettings }) {
         <button onClick={() => window.print()} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>طباعة التقرير</button>
       </div>
       {order.has_critical && <div className="px-4 py-3 rounded-lg text-sm font-bold" style={{ background: C.criticalDeepSoft, color: C.criticalDeep }}>ℹ تحتوي بعض نتائج هذا التقرير على قيم تستدعي المراجعة — يُنصح بمراجعة الطبيب المختص في أقرب وقت</div>}
-      <div id="report-area" className="rounded-lg p-5 md:p-8 overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+      <div id="report-area" className="printable-area rounded-lg p-5 md:p-8 overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <div className="flex items-center justify-between flex-wrap gap-2 pb-4 mb-4" style={{ borderBottom: `2px solid ${C.ink}` }}>
           <div className="flex items-center gap-3">
             <img src={logoSrc} alt="شعار المختبر" style={{ height: 48, width: "auto" }} />
