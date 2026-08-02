@@ -19,8 +19,9 @@
     @media print {
       .no-print { display: none !important; }
       body * { visibility: hidden; }
-      #report-area, #report-area * { visibility: visible; }
-      #report-area { position: absolute; top: 0; right: 0; left: 0; width: 100%; border: none !important; }
+      .printable-area, .printable-area *, #report-area, #report-area * { visibility: visible; }
+      .printable-area, #report-area { position: absolute; top: 0; right: 0; left: 0; width: 100%; border: none !important; }
+      .hidden.print\:block { display: block !important; }
     }
   </style>
 </head>
