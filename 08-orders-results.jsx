@@ -196,7 +196,7 @@ function ResultsEntryView({ order, patient, catalog, actions, setView }) {
           const r = resolveTestRanges(t, patient);
           return (
             <div key={t.id} className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3 items-center" style={{ borderBottom: idx < tests.length - 1 ? `1px solid ${C.line}` : 'none' }}>
-              <div className="col-span-2 md:col-span-1"><div className="font-bold text-sm" style={{ color: C.ink }}>{t.name}</div><div className="text-xs font-mono" style={{ color: C.inkMuted }}>المعدل: {r.min}–{r.max} {t.unit}</div></div>
+              <div className="col-span-2 md:col-span-1"><div className="font-bold text-sm" style={{ color: C.ink }}>{t.name}</div><div className="text-xs font-mono" style={{ color: C.inkMuted }}>المعدل: <bdi dir="ltr">{r.min}–{r.max} {t.unit}</bdi></div></div>
               <input type="number" step="any" min="0" value={v} onChange={(e) => setValues({ ...values, [t.id]: e.target.value })} placeholder="القيمة" className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} />
               <div>{showGauge && <RangeGauge value={num} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} />}</div>
               <div>{showGauge && <Flag value={num} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} />}</div>
@@ -279,7 +279,7 @@ function ReportView({ order, patient, catalog, setView, labSettings }) {
                     <tr key={t.id} style={{ borderBottom: `1px solid ${C.line}`, background: rowBg }}>
                       <td className="py-2.5" style={{ color: C.ink }}>{t.name}</td>
                       <td className="py-2.5 font-mono font-bold" style={{ color: status !== 'normal' ? C.critical : C.ink }}>{value} {t.unit}</td>
-                      <td className="py-2.5 font-mono text-xs" style={{ color: C.inkMuted }}>{r.min}–{r.max} {t.unit}</td>
+                      <td className="py-2.5 font-mono text-xs" style={{ color: C.inkMuted }}><bdi dir="ltr">{r.min}–{r.max} {t.unit}</bdi></td>
                       <td className="py-2.5 w-28"><RangeGauge value={value} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} /></td>
                       <td className="py-2.5"><ReportFlag value={value} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} /></td>
                     </tr>
