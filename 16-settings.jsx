@@ -103,7 +103,7 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager }
                 {tests.map((c) => (
                   <tr key={c.id} style={{ borderBottom: `1px solid ${C.line}` }}>
                     <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{c.name}</td>
-                    <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{c.min}–{c.max} {c.unit}{c.min_female !== null && c.min_female !== undefined ? ' (حسب الجنس)' : ''}</td>
+                    <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}><bdi dir="ltr">{c.min}–{c.max} {c.unit}</bdi>{c.min_female !== null && c.min_female !== undefined ? ' (حسب الجنس)' : ''}</td>
                     <td className="px-4 py-3 font-mono whitespace-nowrap" style={{ color: C.ink }}>{SAR(c.price)}</td>
                     <td className="px-4 py-3 whitespace-nowrap">{isManager && <div className="flex items-center gap-3"><button onClick={() => startEdit(c)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button><button onClick={() => onDelete(c)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button></div>}</td>
                   </tr>
