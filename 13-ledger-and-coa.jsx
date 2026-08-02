@@ -115,7 +115,13 @@ function PurchasesReportTab({ purchases, suppliers }) {
         </Field>
         <Field label="من تاريخ"><input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
         <Field label="إلى تاريخ"><input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+        <button onClick={() => window.print()} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>تصدير PDF / طباعة</button>
       </div>
+
+      <div id="report-area" className="space-y-4">
+        <div className="hidden print:block mb-1">
+          <div className="text-lg font-bold" style={{ color: C.ink }}>مختبر الشموخ — تقرير المشتريات</div>
+        </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <StatCard label="إجمالي المشتريات" value={SAR(totalAmount)} />
@@ -187,6 +193,7 @@ function PurchasesReportTab({ purchases, suppliers }) {
             {filtered.length === 0 && <tr><td colSpan={6}><EmptyState text="لا توجد فواتير شراء مطابقة" /></td></tr>}
           </tbody>
         </table>
+      </div>
       </div>
     </div>
   );
