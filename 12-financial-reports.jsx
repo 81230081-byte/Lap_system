@@ -189,9 +189,12 @@ function DoctorsCommissionTab({ orders, invoices, referringDoctors, commissionPa
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center flex-wrap gap-2">
+      <div className="flex justify-between items-center flex-wrap gap-2 no-print">
         <div className="text-xs" style={{ color: C.inkMuted }}>تُحسب العمولة على الطلبات المكتملة المرتبطة باسم الطبيب المُدخل عند إنشاء الطلب.</div>
-        <button onClick={() => (showForm ? resetForm() : setShowForm(true))} className="px-3.5 py-2 rounded-lg text-sm font-bold whitespace-nowrap" style={{ background: C.accent, color: '#fff' }}>+ طبيب محوّل</button>
+        <div className="flex gap-2">
+          <button onClick={() => window.print()} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>تصدير PDF / طباعة</button>
+          <button onClick={() => (showForm ? resetForm() : setShowForm(true))} className="px-3.5 py-2 rounded-lg text-sm font-bold whitespace-nowrap" style={{ background: C.accent, color: '#fff' }}>+ طبيب محوّل</button>
+        </div>
       </div>
       <ErrorNote>{error}</ErrorNote>
       {showForm && (
@@ -213,7 +216,8 @@ function DoctorsCommissionTab({ orders, invoices, referringDoctors, commissionPa
           </div>
         </div>
       )}
-      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+      <div className="printable-area rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <div className="hidden print:block px-4 pt-4 pb-1 text-lg font-bold" style={{ color: C.ink }}>مختبر الشموخ — عمولات الأطباء المحوّلين</div>
         <table className="w-full text-sm">
           <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
             <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الطبيب</th>
