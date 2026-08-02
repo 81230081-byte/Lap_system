@@ -96,9 +96,13 @@ function PatientsView({ patients, orders, actions, askConfirm, onViewOrders, onV
 // ---------------------------------------------------------------------------
 // Patient test history / trends
 // ---------------------------------------------------------------------------
-function PatientHistoryView({ patient, orders, catalog, setView }) {
+const HISTORY_STATUS_LABEL = { pending: 'قيد الانتظار', pending_review: 'بانتظار الاعتماد', completed: 'مكتمل', cancelled: 'ملغى' };
+const HISTORY_STATUS_TONE = { pending: 'warning', pending_review: 'accent', completed: 'normal', cancelled: 'muted' };
+
+function PatientHistoryView({ patient, orders, catalog, setView, setActiveOrderId, labSettings }) {
   if (!patient) return <div className="p-6"><EmptyState text="لم يتم تحديد مريض" /></div>;
-  const completed = orders.filter((o) => o.patient_id === patient.id && o.status === 'completed').sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  const visits = orders.filter((o) => o.patient_id === patient.id).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  const completed = visits.filter((o) => o.status === 'completed').slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
   const byTest = {};
   completed.forEach((o) => {
@@ -109,50 +113,91 @@ function PatientHistoryView({ patient, orders, catalog, setView }) {
   });
   const testIds = Object.keys(byTest);
 
+  const openReport = (orderId) => { setActiveOrderId(orderId); setView('report'); };
+
   return (
     <div className="p-6 space-y-5">
-      <button onClick={() => setView('patients')} className="text-sm font-bold" style={{ color: C.accent }}>‹ رجوع للمرضى</button>
-      <div>
-        <div className="text-2xl font-bold" style={{ color: C.ink }}>السجل التاريخي — {patient.name}</div>
-        <div className="text-sm" style={{ color: C.inkMuted }}>{completed.length} طلب مكتمل</div>
-      </div>
-      {testIds.length === 0 ? (
-        <EmptyState text="لا يوجد سجل نتائج سابق لهذا المريض" />
-      ) : (
-        <div className="space-y-4">
-          {testIds.map((testId) => {
-            const test = catalog.find((c) => c.id === testId);
-            if (!test) return null;
-            const points = byTest[testId];
-            const r = resolveTestRanges(test, patient);
-            return (
-              <div key={testId} className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
-                <div className="font-bold text-sm mb-3" style={{ color: C.ink }}>
-                  {test.name} <span className="font-normal text-xs" style={{ color: C.inkMuted }}>(<bdi dir="ltr">{r.min}–{r.max} {test.unit}</bdi>)</span>
-                </div>
-                <div className="space-y-2">
-                  {points.map((pt, idx) => {
-                    const prev = idx > 0 ? points[idx - 1].value : null;
-                    const trend = prev === null ? null : pt.value > prev ? 'up' : pt.value < prev ? 'down' : 'flat';
-                    return (
-                      <div key={idx} className="flex items-center justify-between gap-3 text-sm">
-                        <div className="font-mono text-xs w-28 shrink-0" style={{ color: C.inkMuted }}>{fmtDate(pt.date)}</div>
-                        <div className="flex-1"><RangeGauge value={pt.value} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} /></div>
-                        <div className="font-mono font-bold shrink-0" style={{ color: C.ink }}>{pt.value} {test.unit}</div>
-                        <div className="w-5 text-center shrink-0">
-                          {trend === 'up' && <span style={{ color: C.warning }}>▲</span>}
-                          {trend === 'down' && <span style={{ color: C.accent }}>▼</span>}
-                          {trend === 'flat' && <span style={{ color: C.inkFaint }}>→</span>}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
+      <div className="flex items-center justify-between flex-wrap gap-3 no-print">
+        <div>
+          <div className="text-2xl font-bold" style={{ color: C.ink }}>السجل التاريخي — {patient.name}</div>
+          <div className="text-sm" style={{ color: C.inkMuted }}>{patient.age} سنة · {patient.gender} · {visits.length} زيارة مسجّلة ({completed.length} مكتملة)</div>
         </div>
-      )}
+        <button onClick={() => window.print()} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>تصدير PDF / طباعة</button>
+      </div>
+
+      <div className="printable-area space-y-5">
+        <div className="hidden print:block mb-2">
+          <div className="text-lg font-bold" style={{ color: C.ink }}>{labSettings?.name || 'مختبر الشموخ'} — السجل التاريخي</div>
+          <div className="text-sm" style={{ color: C.inkMuted }}>{patient.name} · {patient.age} سنة · {patient.gender}</div>
+        </div>
+
+        <div className="rounded-lg overflow-hidden" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="px-4 py-3 font-bold text-sm" style={{ borderBottom: `1px solid ${C.line}`, color: C.ink }}>سجل الزيارات</div>
+          {visits.length === 0 ? <EmptyState text="لا توجد زيارات مسجّلة لهذا المريض بعد" /> : (
+            <table className="w-full text-sm">
+              <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+                <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>التاريخ</th>
+                <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>رقم العينة</th>
+                <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>عدد الفحوصات</th>
+                <th className="text-right px-4 py-2.5 font-bold" style={{ color: C.inkMuted }}>الحالة</th>
+                <th className="text-right px-4 py-2.5 font-bold no-print"></th>
+              </tr></thead>
+              <tbody>
+                {visits.map((o) => (
+                  <tr key={o.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <td className="px-4 py-2.5 font-mono whitespace-nowrap" style={{ color: C.ink }}>{fmtDate(o.created_at)}</td>
+                    <td className="px-4 py-2.5 font-mono whitespace-nowrap" style={{ color: C.inkMuted }}>{o.sample_id}</td>
+                    <td className="px-4 py-2.5 font-mono" style={{ color: C.inkMuted }}>{(o.test_ids || []).length}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap"><Badge tone={HISTORY_STATUS_TONE[o.status]}>{HISTORY_STATUS_LABEL[o.status] || o.status}</Badge>{o.has_critical && <span className="mr-1.5" style={{ color: C.criticalDeep }}>⚠</span>}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap no-print">{o.status === 'completed' && <button onClick={() => openReport(o.id)} className="text-xs font-bold" style={{ color: C.accent }}>عرض التقرير</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div>
+          <div className="font-bold text-sm mb-3" style={{ color: C.ink }}>اتجاه الفحوصات عبر الزمن</div>
+          {testIds.length === 0 ? (
+            <EmptyState text="لا يوجد سجل نتائج مكتملة بعد لعرض اتجاهها" />
+          ) : (
+            <div className="space-y-4">
+              {testIds.map((testId) => {
+                const test = catalog.find((c) => c.id === testId);
+                if (!test) return null;
+                const points = byTest[testId];
+                const r = resolveTestRanges(test, patient);
+                return (
+                  <div key={testId} className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}`, breakInside: 'avoid' }}>
+                    <div className="font-bold text-sm mb-3" style={{ color: C.ink }}>
+                      {test.name} <span className="font-normal text-xs" style={{ color: C.inkMuted }}>(<bdi dir="ltr">{r.min}–{r.max} {test.unit}</bdi>)</span>
+                    </div>
+                    <div className="space-y-2">
+                      {points.map((pt, idx) => {
+                        const prev = idx > 0 ? points[idx - 1].value : null;
+                        const trend = prev === null ? null : pt.value > prev ? 'up' : pt.value < prev ? 'down' : 'flat';
+                        return (
+                          <div key={idx} className="flex items-center justify-between gap-3 text-sm">
+                            <div className="font-mono text-xs w-28 shrink-0" style={{ color: C.inkMuted }}>{fmtDate(pt.date)}</div>
+                            <div className="flex-1"><RangeGauge value={pt.value} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} /></div>
+                            <div className="font-mono font-bold shrink-0" style={{ color: C.ink }}>{pt.value} {test.unit}</div>
+                            <div className="w-5 text-center shrink-0">
+                              {trend === 'up' && <span style={{ color: C.warning }}>▲</span>}
+                              {trend === 'down' && <span style={{ color: C.accent }}>▼</span>}
+                              {trend === 'flat' && <span style={{ color: C.inkFaint }}>→</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
