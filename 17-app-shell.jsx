@@ -1,5 +1,12 @@
 // حاوية التطبيق الرئيسية: جلب البيانات، الاشتراك اللحظي، التوجيه بين الشاشات، وكل عمليات الحفظ
 
+const VIEW_TITLES = {
+  dashboard: 'لوحة التحكم', appointments: 'المواعيد', patients: 'المرضى', orders: 'الطلبات والعينات',
+  results: 'إدخال النتائج', report: 'تقرير النتائج', history: 'السجل التاريخي للمريض', inventory: 'المخزون',
+  qc: 'ضبط الجودة', suppliers: 'الموردين والمشتريات', treasury: 'الصناديق والبنوك',
+  'financial-reports': 'التقارير المالية', billing: 'الفواتير', audit: 'سجل التدقيق', settings: 'الإعدادات',
+};
+
 // ---------------------------------------------------------------------------
 // App shell (data + realtime + routing)
 // ---------------------------------------------------------------------------
@@ -10,6 +17,7 @@ function AppShell({ session }) {
   const [staff, setStaff] = useState([]);
   const [labSettings, setLabSettings] = useState(null);
   const [view, setView] = useState('dashboard');
+  const [prevView, setPrevView] = useState(null);
   const [patients, setPatients] = useState([]);
   const [catalog, setCatalog] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -384,8 +392,9 @@ function AppShell({ session }) {
 
   const activeOrder = orders.find((o) => o.id === activeOrderId) || null;
   const activePatient = activeOrder ? patients.find((p) => p.id === activeOrder.patient_id) : null;
-  const goToPatientOrders = (patientId) => { setPatientFilter(patientId); setView('orders'); };
-  const navigate = (v) => { setPatientFilter(null); setView(v); };
+  const goTo = (v) => { setPrevView(view); setView(v); };
+  const goToPatientOrders = (patientId) => { setPrevView(view); setPatientFilter(patientId); setView('orders'); };
+  const navigate = (v) => { setPrevView(view); setPatientFilter(null); setView(v); };
 
   if (loading) return <div className="h-screen w-full flex items-center justify-center" style={{ background: C.bg }}><div className="text-sm" style={{ color: C.inkMuted }}>...جارِ تحميل البيانات</div></div>;
 
@@ -402,7 +411,7 @@ function AppShell({ session }) {
   }
 
   const historyPatient = patients.find((p) => p.id === historyPatientId) || null;
-  const goToPatientHistory = (patientId) => { setHistoryPatientId(patientId); setView('history'); };
+  const goToPatientHistory = (patientId) => { setPrevView(view); setHistoryPatientId(patientId); setView('history'); };
   const navigateMobile = (v) => { navigate(v); setMobileNavOpen(false); };
 
   return (
@@ -419,15 +428,22 @@ function AppShell({ session }) {
           <div className="font-bold text-sm" style={{ color: C.ink }}>{labSettings?.name || 'مختبر الشموخ'}</div>
           <div style={{ width: 24 }} />
         </div>
+        {view !== 'dashboard' && (
+          <div className="no-print flex items-center gap-3 px-6 py-2.5" style={{ background: C.surface, borderBottom: `1px solid ${C.line}` }}>
+            <button onClick={() => goTo(prevView || 'dashboard')} className="text-sm font-bold flex items-center gap-1" style={{ color: C.accent }}>‹ رجوع</button>
+            <span style={{ color: C.line }}>|</span>
+            <span className="text-sm font-bold" style={{ color: C.inkMuted }}>{VIEW_TITLES[view] || ''}</span>
+          </div>
+        )}
         <main className="flex-1 overflow-y-auto">
-          {view === 'dashboard' && <Dashboard data={{ patients, catalog, orders, invoices, inventory, auditLog }} setView={setView} setActiveOrderId={setActiveOrderId} />}
+          {view === 'dashboard' && <Dashboard data={{ patients, catalog, orders, invoices, inventory, auditLog }} setView={goTo} setActiveOrderId={setActiveOrderId} />}
           {view === 'appointments' && <AppointmentsView appointments={appointments} patients={patients} actions={actions} askConfirm={askConfirm} isManager={isManager} onCreateOrder={goToPatientOrders} />}
           {view === 'qc' && <QCView qc={qc} displayName={displayName} actions={actions} isManager={isManager} askConfirm={askConfirm} />}
           {view === 'patients' && <PatientsView patients={patients} orders={orders} actions={actions} askConfirm={askConfirm} onViewOrders={goToPatientOrders} onViewHistory={goToPatientHistory} isManager={isManager} />}
-          {view === 'orders' && <OrdersView patients={patients} catalog={catalog} orders={orders} inventory={inventory} actions={actions} setView={setView} setActiveOrderId={setActiveOrderId} filterPatientId={patientFilter} clearFilter={() => setPatientFilter(null)} askConfirm={askConfirm} isManager={isManager} />}
-          {view === 'results' && <ResultsEntryView order={activeOrder} patient={activePatient} catalog={catalog} actions={actions} setView={setView} />}
-          {view === 'report' && <ReportView order={activeOrder} patient={activePatient} catalog={catalog} setView={setView} labSettings={labSettings} />}
-          {view === 'history' && <PatientHistoryView patient={historyPatient} orders={orders} catalog={catalog} setView={setView} />}
+          {view === 'orders' && <OrdersView patients={patients} catalog={catalog} orders={orders} inventory={inventory} actions={actions} setView={goTo} setActiveOrderId={setActiveOrderId} filterPatientId={patientFilter} clearFilter={() => setPatientFilter(null)} askConfirm={askConfirm} isManager={isManager} />}
+          {view === 'results' && <ResultsEntryView order={activeOrder} patient={activePatient} catalog={catalog} actions={actions} setView={goTo} />}
+          {view === 'report' && <ReportView order={activeOrder} patient={activePatient} catalog={catalog} setView={goTo} labSettings={labSettings} />}
+          {view === 'history' && <PatientHistoryView patient={historyPatient} orders={orders} catalog={catalog} setView={goTo} setActiveOrderId={setActiveOrderId} labSettings={labSettings} />}
           {view === 'inventory' && <InventoryView inventory={inventory} catalog={catalog} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
           {view === 'suppliers' && <SuppliersView suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
           {view === 'treasury' && isManager && <TreasuryView accounts={accounts} transactions={transactions} staff={staff} salaryPayments={salaryPayments} chartOfAccounts={chartOfAccounts} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
