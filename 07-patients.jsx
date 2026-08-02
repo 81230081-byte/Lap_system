@@ -128,7 +128,7 @@ function PatientHistoryView({ patient, orders, catalog, setView }) {
             return (
               <div key={testId} className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
                 <div className="font-bold text-sm mb-3" style={{ color: C.ink }}>
-                  {test.name} <span className="font-normal text-xs" style={{ color: C.inkMuted }}>({r.min}–{r.max} {test.unit})</span>
+                  {test.name} <span className="font-normal text-xs" style={{ color: C.inkMuted }}>(<bdi dir="ltr">{r.min}–{r.max} {test.unit}</bdi>)</span>
                 </div>
                 <div className="space-y-2">
                   {points.map((pt, idx) => {
