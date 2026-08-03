@@ -1,19 +1,28 @@
 // الطلبات/العينات: الإنشاء، إدخال النتائج، الاعتماد أو الرفض، والتقرير القابل للطباعة
 
-function OrdersView({ patients, catalog, orders, inventory, actions, setView, setActiveOrderId, filterPatientId, clearFilter, askConfirm, isManager }) {
+function OrdersView({ patients, catalog, orders, inventory, accounts, actions, setView, setActiveOrderId, filterPatientId, clearFilter, askConfirm, isManager, can, pendingAction, clearPendingAction }) {
+  const canVerify = can ? can('verify_results') : isManager;
   const [tab, setTab] = useState('list');
+  useEffect(() => {
+    if (pendingAction === 'new-order') { setTab('new'); clearPendingAction(); }
+  }, [pendingAction]);
   const [selectedPatient, setSelectedPatient] = useState('');
   const [selectedTests, setSelectedTests] = useState([]);
   const [referringDoctor, setReferringDoctor] = useState('');
+  const [paymentType, setPaymentType] = useState('credit');
+  const [paymentAccountId, setPaymentAccountId] = useState('');
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [busy, setBusy] = useState(false);
   const [rejectingOrder, setRejectingOrder] = useState(null);
 
   const knownDoctors = [...new Set(orders.map((o) => o.referring_doctor).filter(Boolean))];
+  const cashAccounts = (accounts || []).filter((a) => a.type === 'نقدي');
+  const bankAccounts = (accounts || []).filter((a) => a.type === 'بنكي');
 
   const total = catalog.filter((c) => selectedTests.includes(c.id)).reduce((s, c) => s + Number(c.price), 0);
-  const canSubmit = Boolean(selectedPatient) && selectedTests.length > 0 && !busy;
+  const paymentNeedsAccount = paymentType === 'cash' || paymentType === 'transfer';
+  const canSubmit = Boolean(selectedPatient) && selectedTests.length > 0 && !busy && (!paymentNeedsAccount || Boolean(paymentAccountId));
   const toggleTest = (id) => setSelectedTests((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   const lowStockWarnings = catalog.filter((c) => selectedTests.includes(c.id) && c.consumes_item_id)
@@ -22,9 +31,9 @@ function OrdersView({ patients, catalog, orders, inventory, actions, setView, se
   const submit = async () => {
     if (!canSubmit) return;
     setBusy(true);
-    await actions.addOrder(selectedPatient, selectedTests, referringDoctor.trim() || null);
+    await actions.addOrder(selectedPatient, selectedTests, referringDoctor.trim() || null, paymentType, paymentNeedsAccount ? paymentAccountId : null);
     setBusy(false);
-    setSelectedPatient(''); setSelectedTests([]); setReferringDoctor(''); setTab('list');
+    setSelectedPatient(''); setSelectedTests([]); setReferringDoctor(''); setPaymentType('credit'); setPaymentAccountId(''); setTab('list');
   };
 
   let visible = filterPatientId ? orders.filter((o) => o.patient_id === filterPatientId) : orders;
@@ -92,6 +101,33 @@ function OrdersView({ patients, catalog, orders, inventory, actions, setView, se
             })}
           </div>
           {lowStockWarnings.length > 0 && <ErrorNote>تنبيه مخزون: {lowStockWarnings.map((w) => w.name).join('، ')} منخفض حالياً</ErrorNote>}
+          <div className="space-y-2 pt-3" style={{ borderTop: `1px solid ${C.line}` }}>
+            <div className="text-xs font-bold mb-1" style={{ color: C.inkMuted }}>طريقة الدفع</div>
+            <div className="flex flex-wrap gap-2">
+              {[['credit', 'آجل (على حساب المريض)'], ['cash', 'نقدي'], ['transfer', 'حوالة بنكية']].map(([key, label]) => (
+                <button key={key} type="button" onClick={() => { setPaymentType(key); setPaymentAccountId(''); }} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ background: paymentType === key ? C.accent : C.bg, color: paymentType === key ? '#fff' : C.inkMuted, border: `1px solid ${paymentType === key ? C.accent : C.line}` }}>{label}</button>
+              ))}
+            </div>
+            {paymentType === 'cash' && (
+              <Field label="الصندوق المستلم للمبلغ">
+                <select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+                  <option value="">اختر الصندوق...</option>
+                  {cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+                {cashAccounts.length === 0 && <div className="text-xs mt-1" style={{ color: C.critical }}>لا يوجد صندوق نقدي مسجّل — أضِفه من الصناديق والبنوك أولاً</div>}
+              </Field>
+            )}
+            {paymentType === 'transfer' && (
+              <Field label="الحساب البنكي المستلم للحوالة">
+                <select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+                  <option value="">اختر الحساب البنكي...</option>
+                  {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}{a.bank_name ? ` — ${a.bank_name}` : ''}</option>)}
+                </select>
+                {bankAccounts.length === 0 && <div className="text-xs mt-1" style={{ color: C.critical }}>لا يوجد حساب بنكي مسجّل — أضِفه من الصناديق والبنوك أولاً</div>}
+              </Field>
+            )}
+            {paymentType === 'credit' && <div className="text-xs" style={{ color: C.inkFaint }}>سيُرحَّل المبلغ كاملاً كذمة على حساب المريض حتى يُسدَّد لاحقاً من شاشة الفواتير.</div>}
+          </div>
           <div className="flex items-center justify-between flex-wrap gap-3 pt-3" style={{ borderTop: `1px solid ${C.line}` }}>
             <div className="text-sm" style={{ color: C.inkMuted }}>الإجمالي: <span className="font-mono font-bold text-base" style={{ color: C.ink }}>{SAR(total)}</span></div>
             <button onClick={submit} className="px-4 py-2.5 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff', opacity: canSubmit ? 1 : 0.4 }}>{busy ? '...جارِ الحفظ' : 'تسجيل الطلب'}</button>
@@ -135,9 +171,9 @@ function OrdersView({ patients, catalog, orders, inventory, actions, setView, se
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex items-center gap-3">
                           {o.status === 'pending' && <><button onClick={() => { setActiveOrderId(o.id); setView('results'); }} className="text-xs font-bold" style={{ color: C.accent }}>إدخال النتائج</button>{isManager && <button onClick={() => onCancel(o)} className="text-xs font-bold" style={{ color: C.critical }}>إلغاء</button>}</>}
-                          {o.status === 'pending_review' && (isManager
+                          {o.status === 'pending_review' && (canVerify
                             ? <><button onClick={() => onVerify(o)} className="text-xs font-bold" style={{ color: C.normal }}>اعتماد</button><button onClick={() => setRejectingOrder(o)} className="text-xs font-bold" style={{ color: C.critical }}>إرجاع</button></>
-                            : <span className="text-xs" style={{ color: C.inkFaint }}>بانتظار مراجعة المدير</span>)}
+                            : <span className="text-xs" style={{ color: C.inkFaint }}>بانتظار الاعتماد</span>)}
                           {o.status === 'completed' && <button onClick={() => { setActiveOrderId(o.id); setView('report'); }} className="text-xs font-bold" style={{ color: C.accent }}>التقرير</button>}
                         </div>
                       </td>
