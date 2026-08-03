@@ -5,6 +5,7 @@ const VIEW_TITLES = {
   results: 'إدخال النتائج', report: 'تقرير النتائج', history: 'السجل التاريخي للمريض', inventory: 'المخزون',
   qc: 'ضبط الجودة', suppliers: 'الموردين والمشتريات', treasury: 'الصناديق والبنوك',
   'financial-reports': 'التقارير المالية', billing: 'الفواتير', audit: 'سجل التدقيق', settings: 'الإعدادات',
+  'patient-statement': 'كشف حساب مريض',
 };
 
 // ---------------------------------------------------------------------------
@@ -39,6 +40,7 @@ function AppShell({ session }) {
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [patientFilter, setPatientFilter] = useState(null);
   const [historyPatientId, setHistoryPatientId] = useState(null);
+  const [statementPatientId, setStatementPatientId] = useState(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saveError, setSaveError] = useState(false);
@@ -452,6 +454,8 @@ function AppShell({ session }) {
 
   const historyPatient = patients.find((p) => p.id === historyPatientId) || null;
   const goToPatientHistory = (patientId) => { setPrevView(view); setHistoryPatientId(patientId); setView('history'); };
+  const statementPatient = patients.find((p) => p.id === statementPatientId) || null;
+  const goToPatientStatement = (patientId) => { setPrevView(view); setStatementPatientId(patientId); setView('patient-statement'); };
   const navigateMobile = (v) => { navigate(v); setMobileNavOpen(false); };
 
   return (
@@ -479,13 +483,14 @@ function AppShell({ session }) {
           {view === 'dashboard' && <Dashboard data={{ patients, catalog, orders, invoices, inventory, auditLog }} setView={goTo} setActiveOrderId={setActiveOrderId} onQuickAction={onQuickAction} isManager={isManager} can={can} />}
           {view === 'appointments' && <AppointmentsView appointments={appointments} patients={patients} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} onCreateOrder={goToPatientOrders} pendingAction={pendingAction} clearPendingAction={clearPendingAction} />}
           {view === 'qc' && <QCView qc={qc} displayName={displayName} actions={actions} isManager={isManager} can={can} askConfirm={askConfirm} pendingAction={pendingAction} clearPendingAction={clearPendingAction} />}
-          {view === 'patients' && <PatientsView patients={patients} orders={orders} actions={actions} askConfirm={askConfirm} onViewOrders={goToPatientOrders} onViewHistory={goToPatientHistory} isManager={isManager} can={can} pendingAction={pendingAction} clearPendingAction={clearPendingAction} />}
+          {view === 'patients' && <PatientsView patients={patients} orders={orders} actions={actions} askConfirm={askConfirm} onViewOrders={goToPatientOrders} onViewHistory={goToPatientHistory} onViewStatement={goToPatientStatement} isManager={isManager} can={can} pendingAction={pendingAction} clearPendingAction={clearPendingAction} />}
+          {view === 'patient-statement' && <PatientStatementView patient={statementPatient} orders={orders} invoices={invoices} labSettings={labSettings} onBack={() => goTo('patients')} />}
           {view === 'orders' && <OrdersView patients={patients} catalog={catalog} orders={orders} inventory={inventory} accounts={accounts} actions={actions} setView={goTo} setActiveOrderId={setActiveOrderId} filterPatientId={patientFilter} clearFilter={() => setPatientFilter(null)} askConfirm={askConfirm} isManager={isManager} can={can} pendingAction={pendingAction} clearPendingAction={clearPendingAction} />}
           {view === 'results' && <ResultsEntryView order={activeOrder} patient={activePatient} catalog={catalog} actions={actions} setView={goTo} />}
           {view === 'report' && <ReportView order={activeOrder} patient={activePatient} catalog={catalog} setView={goTo} labSettings={labSettings} />}
           {view === 'history' && <PatientHistoryView patient={historyPatient} orders={orders} catalog={catalog} setView={goTo} setActiveOrderId={setActiveOrderId} labSettings={labSettings} />}
           {view === 'inventory' && <InventoryView inventory={inventory} catalog={catalog} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} pendingAction={pendingAction} clearPendingAction={clearPendingAction} />}
-          {view === 'suppliers' && <SuppliersView suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
+          {view === 'suppliers' && <SuppliersView suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} labSettings={labSettings} />}
           {view === 'treasury' && (isManager || can('view_treasury')) && <TreasuryView accounts={accounts} transactions={transactions} staff={staff} salaryPayments={salaryPayments} chartOfAccounts={chartOfAccounts} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
           {view === 'financial-reports' && (isManager || can('view_financial_reports')) && <FinancialReportsView accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} orders={orders} referringDoctors={referringDoctors} commissionPayments={commissionPayments} patients={patients} suppliers={suppliers} chartOfAccounts={chartOfAccounts} journalLines={journalLines} actions={actions} />}
           {view === 'billing' && <BillingView invoices={invoices} orders={orders} patients={patients} accounts={accounts} actions={actions} />}
