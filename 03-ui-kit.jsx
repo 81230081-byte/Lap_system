@@ -129,3 +129,64 @@ function PaginationBar({ page, totalPages, setPage }) {
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// رسوم بيانية خفيفة بـ SVG (بدون مكتبات خارجية) لعرضها في لوحة تحكم المدير
+// ---------------------------------------------------------------------------
+function BarChart({ data, height = 180, valueFormatter, barColor }) {
+  // data: [{ label, value }]
+  const max = Math.max(1, ...data.map((d) => d.value));
+  const color = barColor || C.accent;
+  return (
+    <div className="w-full">
+      <div className="flex items-end gap-2" style={{ height }}>
+        {data.map((d, i) => {
+          const h = Math.max(2, (d.value / max) * (height - 24));
+          return (
+            <div key={i} className="flex-1 flex flex-col items-center justify-end h-full" title={`${d.label}: ${valueFormatter ? valueFormatter(d.value) : d.value}`}>
+              <div className="text-[10px] font-mono mb-1" style={{ color: C.inkMuted, opacity: d.value ? 1 : 0 }}>{valueFormatter ? valueFormatter(d.value) : d.value}</div>
+              <div className="w-full rounded-t-md transition-all" style={{ height: h, background: color, minWidth: 8 }} />
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex gap-2 mt-1.5">
+        {data.map((d, i) => <div key={i} className="flex-1 text-center text-[10px] font-bold" style={{ color: C.inkMuted }}>{d.label}</div>)}
+      </div>
+    </div>
+  );
+}
+
+function LineChart({ data, height = 160, valueFormatter, lineColor }) {
+  // data: [{ label, value }]
+  const width = 100; // percentage-based viewBox
+  const max = Math.max(1, ...data.map((d) => d.value));
+  const min = Math.min(0, ...data.map((d) => d.value));
+  const range = max - min || 1;
+  const color = lineColor || C.accent;
+  const stepX = data.length > 1 ? width / (data.length - 1) : 0;
+  const points = data.map((d, i) => {
+    const x = data.length > 1 ? i * stepX : width / 2;
+    const y = height - 20 - ((d.value - min) / range) * (height - 40);
+    return { x, y, ...d };
+  });
+  const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+  return (
+    <div className="w-full">
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} preserveAspectRatio="none">
+        <path d={pathD} fill="none" stroke={color} strokeWidth="1.2" vectorEffect="non-scaling-stroke" />
+        {points.map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r="1.6" fill={color} vectorEffect="non-scaling-stroke" />
+        ))}
+      </svg>
+      <div className="flex gap-2 mt-1">
+        {data.map((d, i) => (
+          <div key={i} className="flex-1 text-center">
+            <div className="text-[10px] font-mono" style={{ color: C.inkMuted }}>{valueFormatter ? valueFormatter(d.value) : d.value}</div>
+            <div className="text-[10px] font-bold" style={{ color: C.inkFaint }}>{d.label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
