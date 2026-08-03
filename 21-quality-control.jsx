@@ -3,8 +3,12 @@
 // ---------------------------------------------------------------------------
 // Quality Control
 // ---------------------------------------------------------------------------
-function QCView({ qc, displayName, actions, isManager, askConfirm }) {
+function QCView({ qc, displayName, actions, isManager, can, askConfirm, pendingAction, clearPendingAction }) {
+  const canDelete = isManager || (can && can('delete_qc'));
   const [showForm, setShowForm] = useState(false);
+  useEffect(() => {
+    if (pendingAction === 'new-qc') { setShowForm(true); clearPendingAction(); }
+  }, [pendingAction]);
   const [query, setQuery] = useState('');
   const [filterResult, setFilterResult] = useState('all'); // all | passed | failed
   const [form, setForm] = useState({ item_name: '', level: '', expected_min: '', expected_max: '', result: '', notes: '' });
@@ -136,7 +140,7 @@ function QCView({ qc, displayName, actions, isManager, askConfirm }) {
                   <td className="px-4 py-3 whitespace-nowrap"><Badge tone={q.passed ? 'normal' : 'critical'}>{q.passed ? 'ناجح' : 'فاشل'}</Badge></td>
                   <td className="px-4 py-3 whitespace-nowrap" style={{ color: C.inkMuted }}>{q.checked_by_name || '—'}</td>
                   <td className="px-4 py-3 whitespace-nowrap">
-                    {isManager && <button onClick={() => onDelete(q)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>}
+                    {canDelete && <button onClick={() => onDelete(q)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>}
                   </td>
                 </tr>
               ))}
