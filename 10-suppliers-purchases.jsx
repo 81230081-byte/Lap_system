@@ -5,8 +5,14 @@
 // ---------------------------------------------------------------------------
 function purchasePaid(p) { return (p.purchase_payments || []).reduce((s, x) => s + Number(x.amount), 0); }
 
-function SuppliersView({ suppliers, purchases, inventory, accounts, actions, askConfirm, isManager, can }) {
+function SuppliersView({ suppliers, purchases, inventory, accounts, actions, askConfirm, isManager, can, labSettings }) {
   const [tab, setTab] = useState('suppliers');
+  const [statementSupplierId, setStatementSupplierId] = useState(null);
+
+  if (statementSupplierId) {
+    const supplier = suppliers.find((s) => s.id === statementSupplierId);
+    return <SupplierStatementView supplier={supplier} purchases={purchases} labSettings={labSettings} onBack={() => setStatementSupplierId(null)} />;
+  }
 
   return (
     <div className="p-6 space-y-5">
@@ -18,13 +24,13 @@ function SuppliersView({ suppliers, purchases, inventory, accounts, actions, ask
         </div>
       </div>
       {tab === 'suppliers'
-        ? <SuppliersTab suppliers={suppliers} purchases={purchases} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />
+        ? <SuppliersTab suppliers={suppliers} purchases={purchases} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} onOpenSupplierStatement={setStatementSupplierId} />
         : <PurchasesTab suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} />}
     </div>
   );
 }
 
-function SuppliersTab({ suppliers, purchases, actions, askConfirm, isManager, can }) {
+function SuppliersTab({ suppliers, purchases, actions, askConfirm, isManager, can, onOpenSupplierStatement }) {
   const canManage = isManager || (can && can('manage_suppliers'));
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -89,10 +95,13 @@ function SuppliersTab({ suppliers, purchases, actions, askConfirm, isManager, ca
                   <td className="px-4 py-3 font-mono whitespace-nowrap" style={{ color: C.inkMuted }}>{s.phone}</td>
                   <td className="px-4 py-3 font-mono font-bold whitespace-nowrap" style={{ color: bal ? C.critical : C.inkMuted }}>{SAR(bal)}</td>
                   <td className="px-4 py-3 whitespace-nowrap">
-                    {canManage && <div className="flex items-center gap-3">
-                      <button onClick={() => startEdit(s)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>
-                      <button onClick={() => onDelete(s)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>
-                    </div>}
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <button onClick={() => onOpenSupplierStatement(s.id)} className="text-xs font-bold" style={{ color: C.accent }}>كشف حساب</button>
+                      {canManage && <>
+                        <button onClick={() => startEdit(s)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>
+                        <button onClick={() => onDelete(s)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>
+                      </>}
+                    </div>
                   </td>
                 </tr>
               );
@@ -115,6 +124,7 @@ function PurchasesTab({ suppliers, purchases, inventory, accounts, actions }) {
   const [lines, setLines] = useState({}); // itemId -> { checked, qty, cost }
   const [error, setError] = useState('');
   const [expandedId, setExpandedId] = useState(null);
+  const [detailsId, setDetailsId] = useState(null);
   const [payForm, setPayForm] = useState({ amount: '', method: 'نقدي', accountId: accounts[0]?.id || '' });
   const { page, setPage, totalPages, pageItems } = usePagination(purchases, 6);
 
@@ -237,8 +247,44 @@ function PurchasesTab({ suppliers, purchases, inventory, accounts, actions }) {
                     <td className="px-4 py-3 font-mono font-bold whitespace-nowrap" style={{ color: C.ink }}>{SAR(p.total_amount)}</td>
                     <td className="px-4 py-3 font-mono whitespace-nowrap" style={{ color: remaining ? C.critical : C.inkMuted }}>{SAR(remaining)}</td>
                     <td className="px-4 py-3 whitespace-nowrap"><Badge tone={p.payment_type === 'نقدي' ? 'normal' : remaining ? 'warning' : 'normal'}>{p.payment_type}</Badge></td>
-                    <td className="px-4 py-3 whitespace-nowrap">{remaining > 0 && <button onClick={() => openPay(p)} className="text-xs font-bold" style={{ color: C.accent }}>تسجيل دفعة</button>}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="flex items-center gap-3">
+                        <button onClick={() => setDetailsId(p.id === detailsId ? null : p.id)} className="text-xs font-bold" style={{ color: C.accent }}>{detailsId === p.id ? 'إخفاء' : 'التفاصيل'}</button>
+                        {remaining > 0 && <button onClick={() => openPay(p)} className="text-xs font-bold" style={{ color: C.accent }}>تسجيل دفعة</button>}
+                      </div>
+                    </td>
                   </tr>
+                  {detailsId === p.id && (
+                    <tr style={{ background: C.bg }}>
+                      <td colSpan={6} className="px-4 py-3">
+                        {p.invoice_no && <div className="text-xs mb-2" style={{ color: C.inkMuted }}>رقم فاتورة المورد: <span className="font-mono font-bold" style={{ color: C.ink }}>{p.invoice_no}</span></div>}
+                        <table className="w-full text-xs">
+                          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+                            <th className="text-right py-1.5 font-bold" style={{ color: C.inkMuted }}>الصنف</th>
+                            <th className="text-right py-1.5 font-bold" style={{ color: C.inkMuted }}>الكمية</th>
+                            <th className="text-right py-1.5 font-bold" style={{ color: C.inkMuted }}>سعر الوحدة</th>
+                            <th className="text-right py-1.5 font-bold" style={{ color: C.inkMuted }}>الإجمالي</th>
+                          </tr></thead>
+                          <tbody>
+                            {(p.items || []).map((it, idx) => (
+                              <tr key={idx} style={{ borderBottom: `1px solid ${C.line}` }}>
+                                <td className="py-1.5 font-bold" style={{ color: C.ink }}>{it.item_name}</td>
+                                <td className="py-1.5 font-mono" style={{ color: C.inkMuted }}>{it.quantity}</td>
+                                <td className="py-1.5 font-mono" style={{ color: C.inkMuted }}>{SAR(it.unit_cost)}</td>
+                                <td className="py-1.5 font-mono font-bold" style={{ color: C.ink }}>{SAR(it.quantity * it.unit_cost)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {(p.purchase_payments || []).length > 0 && (
+                          <div className="mt-3 pt-2 text-xs space-y-1" style={{ borderTop: `1px solid ${C.line}`, color: C.inkMuted }}>
+                            <div className="font-bold" style={{ color: C.ink }}>الدفعات المسجّلة</div>
+                            {p.purchase_payments.map((pay) => <div key={pay.id}>{fmtDate(pay.created_at)} · {SAR(pay.amount)} · {pay.method}</div>)}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
                   {expandedId === p.id && (
                     <tr style={{ background: C.bg }}>
                       <td colSpan={6} className="px-4 py-3">
@@ -260,6 +306,83 @@ function PurchasesTab({ suppliers, purchases, inventory, accounts, actions }) {
           </tbody>
         </table>
         <PaginationBar page={page} totalPages={totalPages} setPage={setPage} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// كشف حساب المورد — قابل للطباعة
+// ---------------------------------------------------------------------------
+function SupplierStatementView({ supplier, purchases, labSettings, onBack }) {
+  if (!supplier) return <div className="p-6"><EmptyState text="لم يتم تحديد مورد" /></div>;
+  const supplierPurchases = purchases.filter((p) => p.supplier_id === supplier.id);
+
+  const events = [];
+  supplierPurchases.forEach((p) => {
+    events.push({ date: p.created_at, desc: `فاتورة شراء${p.invoice_no ? ' رقم ' + p.invoice_no : ''}`, debit: Number(p.total_amount), credit: 0 });
+    (p.purchase_payments || []).forEach((pay) => {
+      events.push({ date: pay.created_at, desc: `دفعة (${pay.method})`, debit: 0, credit: Number(pay.amount) });
+    });
+  });
+  events.sort((a, b) => new Date(a.date) - new Date(b.date));
+  let running = 0;
+  const rows = events.map((e) => { running += e.debit - e.credit; return { ...e, balance: running }; });
+  const totalDebit = events.reduce((s, e) => s + e.debit, 0);
+  const totalCredit = events.reduce((s, e) => s + e.credit, 0);
+
+  return (
+    <div className="p-6 space-y-5">
+      <div className="flex items-center justify-between no-print flex-wrap gap-3">
+        <button onClick={onBack} className="text-sm font-bold" style={{ color: C.accent }}>‹ رجوع للموردين</button>
+        <button onClick={() => window.print()} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>طباعة / PDF</button>
+      </div>
+      <div className="printable-area rounded-lg p-5 md:p-8" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <div className="flex items-center justify-between flex-wrap gap-2 pb-4 mb-4" style={{ borderBottom: `2px solid ${C.ink}` }}>
+          <div className="flex items-center gap-3">
+            <img src={labSettings?.logo_b64 || LOGO_B64} alt="شعار" style={{ height: 44, width: 'auto' }} />
+            <div>
+              <div className="text-lg font-bold" style={{ color: C.ink }}>{labSettings?.name || 'مختبر الشموخ'}</div>
+              <div className="text-xs" style={{ color: C.inkMuted }}>كشف حساب مورد</div>
+            </div>
+          </div>
+          <div className="text-left text-xs font-mono" style={{ color: C.inkMuted }}>تاريخ الإصدار: {fmtDate(new Date().toISOString())}</div>
+        </div>
+        <div className="mb-5 text-sm">
+          <div><span style={{ color: C.inkMuted }}>المورد: </span><span className="font-bold" style={{ color: C.ink }}>{supplier.name}</span></div>
+          {supplier.phone && <div><span style={{ color: C.inkMuted }}>الهاتف: </span><span className="font-mono" style={{ color: C.ink }}>{supplier.phone}</span></div>}
+        </div>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `2px solid ${C.ink}` }}>
+            <th className="text-right py-2 font-bold" style={{ color: C.inkMuted }}>التاريخ</th>
+            <th className="text-right py-2 font-bold" style={{ color: C.inkMuted }}>البيان</th>
+            <th className="text-right py-2 font-bold" style={{ color: C.inkMuted }}>مدين (علينا)</th>
+            <th className="text-right py-2 font-bold" style={{ color: C.inkMuted }}>دائن (سدّدنا)</th>
+            <th className="text-right py-2 font-bold" style={{ color: C.inkMuted }}>الرصيد</th>
+          </tr></thead>
+          <tbody>
+            {rows.map((r, idx) => (
+              <tr key={idx} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="py-2 font-mono text-xs" style={{ color: C.inkMuted }}>{fmtDate(r.date)}</td>
+                <td className="py-2" style={{ color: C.ink }}>{r.desc}</td>
+                <td className="py-2 font-mono" style={{ color: r.debit ? C.critical : C.inkFaint }}>{r.debit ? SAR(r.debit) : '—'}</td>
+                <td className="py-2 font-mono" style={{ color: r.credit ? C.normal : C.inkFaint }}>{r.credit ? SAR(r.credit) : '—'}</td>
+                <td className="py-2 font-mono font-bold" style={{ color: C.ink }}>{SAR(r.balance)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && <tr><td colSpan={5}><EmptyState text="لا توجد عمليات مسجّلة لهذا المورد" /></td></tr>}
+          </tbody>
+          {rows.length > 0 && (
+            <tfoot>
+              <tr style={{ borderTop: `2px solid ${C.ink}` }}>
+                <td colSpan={2} className="py-2 font-bold" style={{ color: C.ink }}>الإجمالي</td>
+                <td className="py-2 font-mono font-bold" style={{ color: C.critical }}>{SAR(totalDebit)}</td>
+                <td className="py-2 font-mono font-bold" style={{ color: C.normal }}>{SAR(totalCredit)}</td>
+                <td className="py-2 font-mono font-bold" style={{ color: C.ink }}>{SAR(running)}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
       </div>
     </div>
   );
