@@ -5,9 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>نظام إدارة مختبر الشموخ الطبي</title>
 
-  <!-- التنسيقات والمكتبات الأساسية -->
+  <!-- المكتبات الأساسية -->
   <script src="https://cdn.tailwindcss.com"></script>
-
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -27,21 +26,25 @@
 </head>
 <body class="bg-gray-100 text-gray-900 min-h-screen">
 
-  <!-- شاشة تنبيه الأخطاء لتظهر فوراً على شاشة الأيفون -->
+  <!-- مربع عرض الأخطاء -->
   <div id="debug-box" style="display:none;" class="m-4 p-4 bg-red-100 border-2 border-red-500 text-red-800 rounded-lg text-left font-mono text-sm dir-ltr whitespace-pre-wrap overflow-auto max-h-96"></div>
 
   <!-- مكان عرض التطبيق -->
   <div id="root"></div>
 
-  <!-- سكريبت الدمج والتشغيل الموحد -->
   <script>
-    // التقاط أي خطأ عام يحدث أثناء تشغيل React وإظهاره فوراً
-    window.addEventListener('error', function(e) {
+    // دالة عرض الأخطاء بشكل واضح
+    function showError(title, msg) {
       const debugBox = document.getElementById('debug-box');
       if (debugBox) {
         debugBox.style.display = 'block';
-        debugBox.innerHTML += `<br><b style="color:red">[خطأ أثناء التشغيل]:</b> ${e.message} <br><small>في الملف/السطر: ${e.filename}:${e.lineno}</small>`;
+        debugBox.innerHTML = `<b style="color:red">[${title}]:</b><br><pre class="mt-2 text-xs overflow-auto">${msg}</pre>`;
       }
+    }
+
+    // التقاط أخطاء التشغيل المباشرة
+    window.addEventListener('error', function(e) {
+      showError('خطأ أثناء التشغيل (Runtime Error)', e.message + (e.filename ? `\nالموقع: ${e.filename}:${e.lineno}` : ''));
     });
 
     async function launchApp() {
@@ -69,48 +72,40 @@
         '20-main.jsx'
       ];
 
-      const debugBox = document.getElementById('debug-box');
+      let combinedCode = '';
 
-      try {
-        let combinedCode = `
-          // بيئة وهمية لمنع أخطاء التصدير والاستيراد
-          var exports = {};
-          var module = { exports: exports };
-        `;
-
-        // جلب وقراءة كافة الملفات
-        for (const file of files) {
-          const response = await fetch('./' + file + '?v=' + Date.now());
-          if (!response.ok) {
-            throw new Error(`تعذر تحميل الملف: ${file} (رمز الخطأ: ${response.status})`);
+      // جلب وقراءة كافة الملفات
+      for (const file of files) {
+        try {
+          const res = await fetch('./' + file + '?v=' + Date.now());
+          if (!res.ok) {
+            showError('خطأ تحميل ملف', `تعذر جلب الملف: ${file} (رمز الاستجابة: ${res.status})`);
+            return;
           }
-          let text = await response.text();
-          
-          // تنظيف كلمات import و export لتفادي تعطيل المتصفح
-          text = text.replace(/^\s*import\s+.*?;?/gm, '// import removed');
-          text = text.replace(/^\s*export\s+default\s+/gm, 'window.');
-          text = text.replace(/^\s*export\s+/gm, '');
-
-          combinedCode += `\n/* --- File: ${file} --- */\n` + text;
+          const content = await res.text();
+          combinedCode += `\n/* --- File: ${file} --- */\n` + content;
+        } catch (err) {
+          showError('خطأ في الشبكة', `فشل اتصال جلب الملف: ${file}\n${err.message}`);
+          return;
         }
+      }
 
-        // تحويل الكود المدمج عبر Babel
-        const transpiledCode = Babel.transform(combinedCode, {
-          presets: ['react']
+      // تحويل أكواد JSX إلى JavaScript عادية دون التعامل معها كـ Modules
+      try {
+        const transformed = Babel.transform(combinedCode, {
+          presets: ['react'],
+          sourceType: 'script' // تنبيه Babel بأن الملفات سيناريو مباشر بدون import/export
         }).code;
 
-        // تنفيذ الكود داخل المتصفح
-        const scriptElement = document.createElement('script');
-        scriptElement.text = transpiledCode;
-        document.body.appendChild(scriptElement);
-
-      } catch (err) {
-        debugBox.style.display = 'block';
-        debugBox.innerHTML = `<b style="color:red">فشل تشغيل النظام:</b><br><br>${err.message}`;
+        const scriptEl = document.createElement('script');
+        scriptEl.text = transformed;
+        document.body.appendChild(scriptEl);
+      } catch (babelErr) {
+        showError('خطأ في بناء الأكواد (Babel Syntax Error)', babelErr.message);
       }
     }
 
-    // بدء التشغيل عند اكتمال تحميل الصفحة
+    // بدء التشغيل
     window.addEventListener('DOMContentLoaded', launchApp);
   </script>
 </body>
