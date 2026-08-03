@@ -4,6 +4,7 @@ const SAR = (n) => `${Number(n || 0).toLocaleString('ar-EG-u-nu-latn')} ر.ي`;
 const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('ar-EG-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
 const fmtDateTime = (iso) => iso ? new Date(iso).toLocaleString('ar-EG-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 const PHONE_RE = /^[\d\s+()-]{7,}$/;
+const QUALITATIVE_LABEL = { Positive: 'إيجابي', Negative: 'سلبي' };
 
 function friendlyError(error) {
   if (!error) return 'حدث خطأ غير متوقع، حاول مرة أخرى';
@@ -32,6 +33,16 @@ function classifyValue(value, r) {
   if (value < r.critLow || value > r.critHigh) return 'critical';
   if (value < r.min || value > r.max) return 'abnormal';
   return 'normal';
+}
+// تصنيف موحّد يدعم الفحوصات الرقمية والفحوصات ذات القيم النوعية (إيجابي/سلبي)
+function classifyResult(value, test, patient) {
+  if (value === '' || value === undefined || value === null) return null;
+  if (test && test.value_type === 'qualitative') {
+    if (!test.qualitative_abnormal_value) return null;
+    return value === test.qualitative_abnormal_value ? 'abnormal' : 'normal';
+  }
+  if (isNaN(value)) return null;
+  return classifyValue(Number(value), resolveTestRanges(test, patient));
 }
 function expiryStatus(dateStr) {
   if (!dateStr) return null;
