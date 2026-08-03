@@ -6,8 +6,12 @@
 const APPT_STATUS_LABEL = { scheduled: 'مجدوَل', arrived: 'وصل', completed: 'اكتمل', cancelled: 'ملغى', no_show: 'لم يحضر' };
 const APPT_STATUS_TONE = { scheduled: 'accent', arrived: 'warning', completed: 'normal', cancelled: 'muted', no_show: 'critical' };
 
-function AppointmentsView({ appointments, patients, actions, askConfirm, isManager, onCreateOrder }) {
+function AppointmentsView({ appointments, patients, actions, askConfirm, isManager, can, onCreateOrder, pendingAction, clearPendingAction }) {
+  const canDelete = isManager || (can && can('delete_appointments'));
   const [showForm, setShowForm] = useState(false);
+  useEffect(() => {
+    if (pendingAction === 'new-appointment') { setShowForm(true); clearPendingAction(); }
+  }, [pendingAction]);
   const [query, setQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('upcoming');
   const [form, setForm] = useState({ patient_id: '', patient_name: '', phone: '', date: '', time: '', notes: '' });
@@ -119,7 +123,7 @@ function AppointmentsView({ appointments, patients, actions, askConfirm, isManag
                       {a.status === 'scheduled' && <button onClick={() => actions.updateAppointment(a.id, { status: 'cancelled' }, a.patient_name)} className="text-xs font-bold" style={{ color: C.critical }}>إلغاء</button>}
                       {a.status === 'arrived' && a.patient_id && <button onClick={() => onCreateOrder(a.patient_id)} className="text-xs font-bold" style={{ color: C.accent }}>إنشاء طلب</button>}
                       {a.status === 'arrived' && <button onClick={() => actions.updateAppointment(a.id, { status: 'completed' }, a.patient_name)} className="text-xs font-bold" style={{ color: C.normal }}>اكتمل</button>}
-                      {isManager && <button onClick={() => onDelete(a)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>}
+                      {canDelete && <button onClick={() => onDelete(a)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>}
                     </div>
                   </td>
                 </tr>
