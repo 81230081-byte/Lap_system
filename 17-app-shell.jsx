@@ -15,6 +15,7 @@ function AppShell({ session }) {
   const [role, setRole] = useState('');
   const [myActive, setMyActive] = useState(true);
   const [staff, setStaff] = useState([]);
+  const [permissions, setPermissions] = useState([]);
   const [labSettings, setLabSettings] = useState(null);
   const [view, setView] = useState('dashboard');
   const [prevView, setPrevView] = useState(null);
@@ -42,8 +43,12 @@ function AppShell({ session }) {
   const [loading, setLoading] = useState(true);
   const [saveError, setSaveError] = useState(false);
   const [confirmState, setConfirmState] = useState(null);
+  const [pendingAction, setPendingAction] = useState(null);
+  const clearPendingAction = () => setPendingAction(null);
 
   const isManager = role === 'مدير';
+  const myPermissionSet = new Set(permissions.filter((p) => p.user_id === session.user.id).map((p) => p.permission));
+  const can = (perm) => isManager || myPermissionSet.has(perm);
   const askConfirm = (opts) => setConfirmState({ open: true, ...opts });
   const closeConfirm = () => setConfirmState(null);
 
@@ -57,7 +62,7 @@ function AppShell({ session }) {
 
   const fetchAll = async () => {
     try {
-      const [pRes, cRes, oRes, invRes, invenRes, aRes, profRes, supRes, purRes, accRes, txRes, lsRes, rdRes, spRes, cpRes, coaRes, jlRes, apptRes, qcRes] = await Promise.all([
+      const [pRes, cRes, oRes, invRes, invenRes, aRes, profRes, permRes, supRes, purRes, accRes, txRes, lsRes, rdRes, spRes, cpRes, coaRes, jlRes, apptRes, qcRes] = await Promise.all([
         sb.from('patients').select('*').order('created_at', { ascending: false }),
         sb.from('catalog_tests').select('*').order('created_at'),
         sb.from('orders').select('*').order('created_at', { ascending: false }),
@@ -65,6 +70,7 @@ function AppShell({ session }) {
         sb.from('inventory').select('*').order('name'),
         sb.from('audit_log').select('*').order('created_at', { ascending: false }).limit(300),
         sb.from('profiles').select('*').order('created_at'),
+        sb.from('user_permissions').select('*'),
         sb.from('suppliers').select('*').order('name'),
         sb.from('purchases').select('*, purchase_payments(*)').order('created_at', { ascending: false }),
         sb.from('accounts').select('*').order('created_at'),
@@ -89,6 +95,7 @@ function AppShell({ session }) {
         const me = profRes.data.find((p) => p.id === session.user.id);
         if (me) { setDisplayName(me.display_name); setRole(me.role); setMyActive(me.active !== false); }
       }
+      if (permRes.data) setPermissions(permRes.data);
       if (supRes.data) setSuppliers(supRes.data);
       if (purRes.data) setPurchases(purRes.data);
       if (accRes.data) setAccounts(accRes.data);
@@ -137,9 +144,9 @@ function AppShell({ session }) {
       fetchAll();
     },
 
-    addOrder: async (patientId, testIds, referringDoctor) => {
+    addOrder: async (patientId, testIds, referringDoctor, paymentType, accountId) => {
       const patient = patients.find((p) => p.id === patientId);
-      const { error } = await sb.rpc('create_order', { p_patient_id: patientId, p_test_ids: testIds, p_user_name: displayName, p_patient_name: patient?.name || '', p_referring_doctor: referringDoctor || null });
+      const { error } = await sb.rpc('create_order', { p_patient_id: patientId, p_test_ids: testIds, p_user_name: displayName, p_patient_name: patient?.name || '', p_referring_doctor: referringDoctor || null, p_payment_type: paymentType || 'credit', p_account_id: accountId || null });
       if (error) { notify('error', friendlyError(error)); throw error; }
       fetchAll();
     },
@@ -304,6 +311,37 @@ function AppShell({ session }) {
       if (error) { notify('error', friendlyError(error)); throw error; }
       fetchAll();
     },
+
+    createUser: async (email, password, displayName, initialRole) => {
+      const { data, error } = await sb.functions.invoke('manage-users', { body: { action: 'create_user', email, password, display_name: displayName, role: initialRole } });
+      if (error || data?.error) { notify('error', data?.error || friendlyError(error)); throw (error || new Error(data?.error)); }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'إنشاء مستخدم جديد', p_details: `${displayName} — ${email}` });
+      notify('success', 'تم إنشاء الحساب بنجاح');
+      fetchAll();
+    },
+    deleteUser: async (id, name) => {
+      const { data, error } = await sb.functions.invoke('manage-users', { body: { action: 'delete_user', id } });
+      if (error || data?.error) { notify('error', data?.error || friendlyError(error)); throw (error || new Error(data?.error)); }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف مستخدم', p_details: name || '' });
+      fetchAll();
+    },
+    resetUserPassword: async (id, newPassword) => {
+      const { data, error } = await sb.functions.invoke('manage-users', { body: { action: 'reset_password', id, new_password: newPassword } });
+      if (error || data?.error) { notify('error', data?.error || friendlyError(error)); throw (error || new Error(data?.error)); }
+      notify('success', 'تم تحديث كلمة المرور');
+    },
+    grantPermission: async (userId, userName, permission, label) => {
+      const { error } = await sb.from('user_permissions').insert({ user_id: userId, permission, granted_by: session.user.id });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'منح صلاحية', p_details: `${userName} ← ${label || permission}` });
+      fetchAll();
+    },
+    revokePermission: async (userId, userName, permission, label) => {
+      const { error } = await sb.from('user_permissions').delete().eq('user_id', userId).eq('permission', permission);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      await sb.rpc('log_action', { p_user_name: displayName, p_action: 'سحب صلاحية', p_details: `${userName} ← ${label || permission}` });
+      fetchAll();
+    },
     updateLabSettings: async (patch) => {
       const { error } = await sb.from('lab_settings').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', true);
       if (error) { notify('error', friendlyError(error)); throw error; }
@@ -393,6 +431,8 @@ function AppShell({ session }) {
   const activeOrder = orders.find((o) => o.id === activeOrderId) || null;
   const activePatient = activeOrder ? patients.find((p) => p.id === activeOrder.patient_id) : null;
   const goTo = (v) => { setPrevView(view); setView(v); };
+  const QUICK_ACTION_VIEW = { 'new-order': 'orders', 'new-patient': 'patients', 'new-appointment': 'appointments', 'new-payment': 'billing', 'new-qc': 'qc', 'new-inventory': 'inventory' };
+  const onQuickAction = (key) => { setPendingAction(key); goTo(QUICK_ACTION_VIEW[key] || 'dashboard'); };
   const goToPatientOrders = (patientId) => { setPrevView(view); setPatientFilter(patientId); setView('orders'); };
   const navigate = (v) => { setPrevView(view); setPatientFilter(null); setView(v); };
 
@@ -420,7 +460,7 @@ function AppShell({ session }) {
         <div className="fixed inset-0 z-40 md:hidden" style={{ background: 'rgba(28,38,34,0.5)' }} onClick={() => setMobileNavOpen(false)} />
       )}
       <div className={`no-print h-full ${mobileNavOpen ? 'fixed inset-y-0 right-0 z-50' : 'hidden'} md:static md:block md:z-auto`}>
-        <Sidebar view={view} setView={navigateMobile} displayName={displayName} role={role} isManager={isManager} labName={labSettings?.name} logoSrc={labSettings?.logo_b64 || LOGO_B64} onLogout={() => sb.auth.signOut()} onExport={exportBackup} saveError={saveError} />
+        <Sidebar view={view} setView={navigateMobile} displayName={displayName} role={role} isManager={isManager} can={can} labName={labSettings?.name} logoSrc={labSettings?.logo_b64 || LOGO_B64} onLogout={() => sb.auth.signOut()} onExport={exportBackup} saveError={saveError} />
       </div>
       <div className="flex-1 h-full flex flex-col overflow-hidden">
         <div className="no-print md:hidden flex items-center justify-between px-4 py-3" style={{ background: C.surface, borderBottom: `1px solid ${C.line}` }}>
@@ -436,21 +476,21 @@ function AppShell({ session }) {
           </div>
         )}
         <main className="flex-1 overflow-y-auto">
-          {view === 'dashboard' && <Dashboard data={{ patients, catalog, orders, invoices, inventory, auditLog }} setView={goTo} setActiveOrderId={setActiveOrderId} />}
-          {view === 'appointments' && <AppointmentsView appointments={appointments} patients={patients} actions={actions} askConfirm={askConfirm} isManager={isManager} onCreateOrder={goToPatientOrders} />}
-          {view === 'qc' && <QCView qc={qc} displayName={displayName} actions={actions} isManager={isManager} askConfirm={askConfirm} />}
-          {view === 'patients' && <PatientsView patients={patients} orders={orders} actions={actions} askConfirm={askConfirm} onViewOrders={goToPatientOrders} onViewHistory={goToPatientHistory} isManager={isManager} />}
-          {view === 'orders' && <OrdersView patients={patients} catalog={catalog} orders={orders} inventory={inventory} actions={actions} setView={goTo} setActiveOrderId={setActiveOrderId} filterPatientId={patientFilter} clearFilter={() => setPatientFilter(null)} askConfirm={askConfirm} isManager={isManager} />}
+          {view === 'dashboard' && <Dashboard data={{ patients, catalog, orders, invoices, inventory, auditLog }} setView={goTo} setActiveOrderId={setActiveOrderId} onQuickAction={onQuickAction} isManager={isManager} can={can} />}
+          {view === 'appointments' && <AppointmentsView appointments={appointments} patients={patients} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} onCreateOrder={goToPatientOrders} pendingAction={pendingAction} clearPendingAction={clearPendingAction} />}
+          {view === 'qc' && <QCView qc={qc} displayName={displayName} actions={actions} isManager={isManager} can={can} askConfirm={askConfirm} pendingAction={pendingAction} clearPendingAction={clearPendingAction} />}
+          {view === 'patients' && <PatientsView patients={patients} orders={orders} actions={actions} askConfirm={askConfirm} onViewOrders={goToPatientOrders} onViewHistory={goToPatientHistory} isManager={isManager} can={can} pendingAction={pendingAction} clearPendingAction={clearPendingAction} />}
+          {view === 'orders' && <OrdersView patients={patients} catalog={catalog} orders={orders} inventory={inventory} accounts={accounts} actions={actions} setView={goTo} setActiveOrderId={setActiveOrderId} filterPatientId={patientFilter} clearFilter={() => setPatientFilter(null)} askConfirm={askConfirm} isManager={isManager} can={can} pendingAction={pendingAction} clearPendingAction={clearPendingAction} />}
           {view === 'results' && <ResultsEntryView order={activeOrder} patient={activePatient} catalog={catalog} actions={actions} setView={goTo} />}
           {view === 'report' && <ReportView order={activeOrder} patient={activePatient} catalog={catalog} setView={goTo} labSettings={labSettings} />}
           {view === 'history' && <PatientHistoryView patient={historyPatient} orders={orders} catalog={catalog} setView={goTo} setActiveOrderId={setActiveOrderId} labSettings={labSettings} />}
-          {view === 'inventory' && <InventoryView inventory={inventory} catalog={catalog} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
-          {view === 'suppliers' && <SuppliersView suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
-          {view === 'treasury' && isManager && <TreasuryView accounts={accounts} transactions={transactions} staff={staff} salaryPayments={salaryPayments} chartOfAccounts={chartOfAccounts} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
-          {view === 'financial-reports' && isManager && <FinancialReportsView accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} orders={orders} referringDoctors={referringDoctors} commissionPayments={commissionPayments} patients={patients} suppliers={suppliers} chartOfAccounts={chartOfAccounts} journalLines={journalLines} actions={actions} />}
+          {view === 'inventory' && <InventoryView inventory={inventory} catalog={catalog} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} pendingAction={pendingAction} clearPendingAction={clearPendingAction} />}
+          {view === 'suppliers' && <SuppliersView suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
+          {view === 'treasury' && (isManager || can('view_treasury')) && <TreasuryView accounts={accounts} transactions={transactions} staff={staff} salaryPayments={salaryPayments} chartOfAccounts={chartOfAccounts} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
+          {view === 'financial-reports' && (isManager || can('view_financial_reports')) && <FinancialReportsView accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} orders={orders} referringDoctors={referringDoctors} commissionPayments={commissionPayments} patients={patients} suppliers={suppliers} chartOfAccounts={chartOfAccounts} journalLines={journalLines} actions={actions} />}
           {view === 'billing' && <BillingView invoices={invoices} orders={orders} patients={patients} accounts={accounts} actions={actions} />}
           {view === 'audit' && <AuditLogView auditLog={auditLog} />}
-          {view === 'settings' && <SettingsView catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} isManager={isManager} staff={staff} myId={session.user.id} labSettings={labSettings} />}
+          {view === 'settings' && <SettingsView catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} staff={staff} permissions={permissions} myId={session.user.id} labSettings={labSettings} />}
         </main>
       </div>
       <ConfirmDialog state={confirmState} onCancel={closeConfirm} />
