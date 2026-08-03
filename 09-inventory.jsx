@@ -3,8 +3,12 @@
 // ---------------------------------------------------------------------------
 // Inventory
 // ---------------------------------------------------------------------------
-function InventoryView({ inventory, catalog, actions, askConfirm, isManager }) {
+function InventoryView({ inventory, catalog, actions, askConfirm, isManager, can, pendingAction, clearPendingAction }) {
+  const canManage = isManager || (can && can('manage_inventory'));
   const [showForm, setShowForm] = useState(false);
+  useEffect(() => {
+    if (pendingAction === 'new-inventory' && canManage) { setShowForm(true); clearPendingAction(); }
+  }, [pendingAction]);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ name: '', unit: '', quantity: '', threshold: '', expiry: '' });
   const [error, setError] = useState('');
@@ -33,9 +37,9 @@ function InventoryView({ inventory, catalog, actions, askConfirm, isManager }) {
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="text-2xl font-bold" style={{ color: C.ink }}>المخزون</div>
-        {isManager && <button onClick={() => (showForm ? resetForm() : setShowForm(true))} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>+ صنف جديد</button>}
+        {canManage && <button onClick={() => (showForm ? resetForm() : setShowForm(true))} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>+ صنف جديد</button>}
       </div>
-      {showForm && isManager && (
+      {showForm && canManage && (
         <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <Field label="اسم الصنف"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
@@ -69,7 +73,7 @@ function InventoryView({ inventory, catalog, actions, askConfirm, isManager }) {
                 <tr key={item.id} style={{ borderBottom: `1px solid ${C.line}` }}>
                   <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{item.name}</td>
                   <td className="px-4 py-3 whitespace-nowrap">
-                    {isManager
+                    {canManage
                       ? <input type="number" min="0" value={item.quantity} onChange={(e) => actions.setQuantity(item.id, item.name, Math.max(0, Number(e.target.value)))} className="w-20 px-2 py-1 rounded-md text-sm font-mono" style={inputStyle} />
                       : <span className="font-mono font-bold" style={{ color: C.ink }}>{item.quantity}</span>}
                     <span className="text-xs" style={{ color: C.inkMuted }}> {item.unit}</span>
@@ -83,8 +87,8 @@ function InventoryView({ inventory, catalog, actions, askConfirm, isManager }) {
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <div className="flex items-center gap-3">
-                      {isManager && <button onClick={() => startEdit(item)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>}
-                      {isManager && <button onClick={() => onDelete(item)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>}
+                      {canManage && <button onClick={() => startEdit(item)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>}
+                      {canManage && <button onClick={() => onDelete(item)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>}
                     </div>
                   </td>
                 </tr>
