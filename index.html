@@ -33,7 +33,16 @@
   <div id="root"></div>
 
   <script>
-    // دالة عرض الأخطاء بشكل واضح
+    // 1. محاكي دالة require للمتصفح
+    window.require = function(moduleName) {
+      if (moduleName === 'react') return window.React;
+      if (moduleName === 'react-dom' || moduleName === 'react-dom/client') return window.ReactDOM;
+      if (moduleName === '@supabase/supabase-js' || moduleName === 'supabase') return window.supabase;
+      if (moduleName === 'lucide-react' || moduleName === 'lucide') return window.lucide;
+      return window[moduleName] || {};
+    };
+
+    // 2. دالة عرض الأخطاء
     function showError(title, msg) {
       const debugBox = document.getElementById('debug-box');
       if (debugBox) {
@@ -42,7 +51,7 @@
       }
     }
 
-    // التقاط أخطاء التشغيل المباشرة
+    // 3. التقاط أخطاء التشغيل المباشرة
     window.addEventListener('error', function(e) {
       showError('خطأ أثناء التشغيل (Runtime Error)', e.message + (e.filename ? `\nالموقع: ${e.filename}:${e.lineno}` : ''));
     });
@@ -90,11 +99,11 @@
         }
       }
 
-      // تحويل أكواد JSX إلى JavaScript عادية دون التعامل معها كـ Modules
+      // تحويل الأكواد وتنفيذها
       try {
         const transformed = Babel.transform(combinedCode, {
           presets: ['react'],
-          sourceType: 'script' // تنبيه Babel بأن الملفات سيناريو مباشر بدون import/export
+          sourceType: 'script'
         }).code;
 
         const scriptEl = document.createElement('script');
