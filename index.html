@@ -14,7 +14,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
 
-  <!-- تنسيقات الطباعة: تُخفي عناصر التحكم (no-print) وتُظهر منطقة التقرير فقط عند الطباعة -->
+  <!-- تنسيقات الطباعة -->
   <style>
     @media print {
       .no-print { display: none !important; }
@@ -27,16 +27,25 @@
 </head>
 <body class="bg-gray-100 text-gray-900 min-h-screen">
 
-  <!-- شاشة تنبيه الأخطاء -->
-  <div id="debug-box" style="display:none;" class="m-4 p-4 bg-red-100 border-2 border-red-500 text-red-800 rounded-lg text-left font-mono text-sm dir-ltr"></div>
+  <!-- شاشة تنبيه الأخطاء لتظهر فوراً على شاشة الأيفون -->
+  <div id="debug-box" style="display:none;" class="m-4 p-4 bg-red-100 border-2 border-red-500 text-red-800 rounded-lg text-left font-mono text-sm dir-ltr whitespace-pre-wrap overflow-auto max-h-96"></div>
 
   <!-- مكان عرض التطبيق -->
   <div id="root"></div>
 
   <!-- سكريبت الدمج والتشغيل الموحد -->
   <script>
+    // التقاط أي خطأ عام يحدث أثناء تشغيل React وإظهاره فوراً
+    window.addEventListener('error', function(e) {
+      const debugBox = document.getElementById('debug-box');
+      if (debugBox) {
+        debugBox.style.display = 'block';
+        debugBox.innerHTML += `<br><b style="color:red">[خطأ أثناء التشغيل]:</b> ${e.message} <br><small>في الملف/السطر: ${e.filename}:${e.lineno}</small>`;
+      }
+    });
+
     async function launchApp() {
-      // قائمة كافة ملفات النظام بالترتيب الصحيح
+      // قائمة كافة ملفات النظام
       const files = [
         '01-config.js',
         '02-helpers.js',
@@ -57,21 +66,31 @@
         '17-app-shell.jsx',
         '19-appointments.jsx',
         '21-quality-control.jsx',
-        '20-main.jsx' // يجب أن يكون الملف الرئيسي في النهاية
+        '20-main.jsx'
       ];
 
       const debugBox = document.getElementById('debug-box');
 
       try {
-        let combinedCode = '';
+        let combinedCode = `
+          // بيئة وهمية لمنع أخطاء التصدير والاستيراد
+          var exports = {};
+          var module = { exports: exports };
+        `;
 
         // جلب وقراءة كافة الملفات
         for (const file of files) {
-          const response = await fetch('./' + file);
+          const response = await fetch('./' + file + '?v=' + Date.now());
           if (!response.ok) {
             throw new Error(`تعذر تحميل الملف: ${file} (رمز الخطأ: ${response.status})`);
           }
-          const text = await response.text();
+          let text = await response.text();
+          
+          // تنظيف كلمات import و export لتفادي تعطيل المتصفح
+          text = text.replace(/^\s*import\s+.*?;?/gm, '// import removed');
+          text = text.replace(/^\s*export\s+default\s+/gm, 'window.');
+          text = text.replace(/^\s*export\s+/gm, '');
+
           combinedCode += `\n/* --- File: ${file} --- */\n` + text;
         }
 
