@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 function purchasePaid(p) { return (p.purchase_payments || []).reduce((s, x) => s + Number(x.amount), 0); }
 
-function SuppliersView({ suppliers, purchases, inventory, accounts, actions, askConfirm, isManager }) {
+function SuppliersView({ suppliers, purchases, inventory, accounts, actions, askConfirm, isManager, can }) {
   const [tab, setTab] = useState('suppliers');
 
   return (
@@ -18,13 +18,14 @@ function SuppliersView({ suppliers, purchases, inventory, accounts, actions, ask
         </div>
       </div>
       {tab === 'suppliers'
-        ? <SuppliersTab suppliers={suppliers} purchases={purchases} actions={actions} askConfirm={askConfirm} isManager={isManager} />
+        ? <SuppliersTab suppliers={suppliers} purchases={purchases} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />
         : <PurchasesTab suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} />}
     </div>
   );
 }
 
-function SuppliersTab({ suppliers, purchases, actions, askConfirm, isManager }) {
+function SuppliersTab({ suppliers, purchases, actions, askConfirm, isManager, can }) {
+  const canManage = isManager || (can && can('manage_suppliers'));
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ name: '', phone: '', notes: '' });
@@ -53,10 +54,10 @@ function SuppliersTab({ suppliers, purchases, actions, askConfirm, isManager }) 
 
   return (
     <div className="space-y-4">
-      {isManager && <div className="flex justify-end">
+      {canManage && <div className="flex justify-end">
         <button onClick={() => (showForm ? resetForm() : setShowForm(true))} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>+ مورد جديد</button>
       </div>}
-      {showForm && isManager && (
+      {showForm && canManage && (
         <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <Field label="اسم المورد"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
@@ -88,7 +89,7 @@ function SuppliersTab({ suppliers, purchases, actions, askConfirm, isManager }) 
                   <td className="px-4 py-3 font-mono whitespace-nowrap" style={{ color: C.inkMuted }}>{s.phone}</td>
                   <td className="px-4 py-3 font-mono font-bold whitespace-nowrap" style={{ color: bal ? C.critical : C.inkMuted }}>{SAR(bal)}</td>
                   <td className="px-4 py-3 whitespace-nowrap">
-                    {isManager && <div className="flex items-center gap-3">
+                    {canManage && <div className="flex items-center gap-3">
                       <button onClick={() => startEdit(s)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>
                       <button onClick={() => onDelete(s)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>
                     </div>}
