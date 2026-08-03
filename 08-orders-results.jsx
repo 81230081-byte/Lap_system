@@ -201,8 +201,10 @@ function ResultsEntryView({ order, patient, catalog, actions, setView }) {
   if (!order) return <div className="p-6"><EmptyState text="لم يتم تحديد طلب" /></div>;
 
   const tests = order.test_ids.map((id) => catalog.find((c) => c.id === id)).filter(Boolean);
-  const allFilled = tests.every((t) => values[t.id] !== '' && !isNaN(Number(values[t.id])) && Number(values[t.id]) >= 0);
+  const isValidValue = (t, v) => t.value_type === 'qualitative' ? (v === 'Positive' || v === 'Negative') : (v !== '' && !isNaN(Number(v)) && Number(v) >= 0);
+  const allFilled = tests.every((t) => isValidValue(t, values[t.id]));
   const anyCritical = tests.some((t) => {
+    if (t.value_type === 'qualitative') return false;
     const v = values[t.id];
     if (v === '' || isNaN(Number(v))) return false;
     return classifyValue(Number(v), resolveTestRanges(t, patient)) === 'critical';
@@ -211,8 +213,8 @@ function ResultsEntryView({ order, patient, catalog, actions, setView }) {
   const save = async () => {
     if (!allFilled) return;
     setBusy(true);
-    const numeric = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, Number(v)]));
-    await actions.submitResults(order.id, numeric, anyCritical, order.sample_id);
+    const converted = Object.fromEntries(tests.map((t) => [t.id, t.value_type === 'qualitative' ? values[t.id] : Number(values[t.id])]));
+    await actions.submitResults(order.id, converted, anyCritical, order.sample_id);
     setBusy(false);
     setView('orders');
   };
@@ -228,7 +230,19 @@ function ResultsEntryView({ order, patient, catalog, actions, setView }) {
       {anyCritical && <div className="px-4 py-3 rounded-lg text-sm font-bold" style={{ background: C.criticalDeepSoft, color: C.criticalDeep }}>⚠ توجد قيمة حرجة ضمن هذه النتائج — يُرجى التأكد منها قبل الحفظ</div>}
       <div className="rounded-lg" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         {tests.map((t, idx) => {
-          const v = values[t.id]; const num = Number(v); const showGauge = v !== '' && !isNaN(num);
+          const v = values[t.id];
+          if (t.value_type === 'qualitative') {
+            return (
+              <div key={t.id} className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3 items-center" style={{ borderBottom: idx < tests.length - 1 ? `1px solid ${C.line}` : 'none' }}>
+                <div className="col-span-2 md:col-span-1"><div className="font-bold text-sm" style={{ color: C.ink }}>{t.name}</div><div className="text-xs" style={{ color: C.inkMuted }}>نتيجة نوعية</div></div>
+                <div className="md:col-span-2 flex gap-2">
+                  <button type="button" onClick={() => setValues({ ...values, [t.id]: 'Negative' })} className="px-4 py-2 rounded-md text-sm font-bold flex-1" style={{ background: v === 'Negative' ? C.normal : C.bg, color: v === 'Negative' ? '#fff' : C.inkMuted, border: `1px solid ${v === 'Negative' ? C.normal : C.line}` }}>سلبي Negative</button>
+                  <button type="button" onClick={() => setValues({ ...values, [t.id]: 'Positive' })} className="px-4 py-2 rounded-md text-sm font-bold flex-1" style={{ background: v === 'Positive' ? C.critical : C.bg, color: v === 'Positive' ? '#fff' : C.inkMuted, border: `1px solid ${v === 'Positive' ? C.critical : C.line}` }}>إيجابي Positive</button>
+                </div>
+              </div>
+            );
+          }
+          const num = Number(v); const showGauge = v !== '' && !isNaN(num);
           const r = resolveTestRanges(t, patient);
           return (
             <div key={t.id} className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3 items-center" style={{ borderBottom: idx < tests.length - 1 ? `1px solid ${C.line}` : 'none' }}>
@@ -268,6 +282,26 @@ function ReportView({ order, patient, catalog, setView, labSettings }) {
         <button onClick={() => window.print()} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>طباعة التقرير</button>
       </div>
       {order.has_critical && <div className="px-4 py-3 rounded-lg text-sm font-bold" style={{ background: C.criticalDeepSoft, color: C.criticalDeep }}>ℹ تحتوي بعض نتائج هذا التقرير على قيم تستدعي المراجعة — يُنصح بمراجعة الطبيب المختص في أقرب وقت</div>}
+      {(() => {
+        const abnormal = tests
+          .map((t) => ({ t, value: order.results[t.id], status: classifyResult(order.results[t.id], t, patient) }))
+          .filter((x) => x.status === 'abnormal' || x.status === 'critical');
+        if (abnormal.length === 0) return null;
+        return (
+          <div className="no-print rounded-lg p-4 space-y-2" style={{ background: C.surface, border: `1px solid ${C.warning}` }}>
+            <div className="text-sm font-bold" style={{ color: C.ink }}>ملخص القيم غير الطبيعية <span className="font-normal text-xs" style={{ color: C.inkMuted }}>— أداة مساعدة للفني/الطبيب فقط، وليست تشخيصاً طبياً ولا تُطبع في تقرير المريض</span></div>
+            <ul className="text-sm space-y-1 list-disc pr-5">
+              {abnormal.map(({ t, value, status }) => (
+                <li key={t.id} style={{ color: status === 'critical' ? C.criticalDeep : C.critical }}>
+                  {t.name}: <span className="font-mono font-bold">{t.value_type === 'qualitative' ? (QUALITATIVE_LABEL[value] || value) : `${value} ${t.unit}`}</span>
+                  {status === 'critical' ? ' — قيمة حرجة' : ' — خارج المعدل الطبيعي'}
+                </li>
+              ))}
+            </ul>
+            <div className="text-xs" style={{ color: C.inkFaint }}>هذا الملخص مبني على مقارنة النتائج بالمعدلات المُدخلة في النظام فقط، ولا يُغني عن تقييم الطبيب المختص للحالة السريرية الكاملة للمريض.</div>
+          </div>
+        );
+      })()}
       <div id="report-area" className="printable-area rounded-lg p-5 md:p-8 overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <div className="flex items-center justify-between flex-wrap gap-2 pb-4 mb-4" style={{ borderBottom: `2px solid ${C.ink}` }}>
           <div className="flex items-center gap-3">
@@ -308,16 +342,19 @@ function ReportView({ order, patient, catalog, setView, labSettings }) {
               <tbody>
                 {catTests.map((t) => {
                   const value = order.results[t.id];
-                  const r = resolveTestRanges(t, patient);
-                  const status = classifyValue(value, r);
+                  const isQual = t.value_type === 'qualitative';
+                  const r = isQual ? null : resolveTestRanges(t, patient);
+                  const status = classifyResult(value, t, patient);
                   const rowBg = status === 'critical' ? C.criticalDeepSoft : status === 'abnormal' ? C.criticalSoft : 'transparent';
                   return (
                     <tr key={t.id} style={{ borderBottom: `1px solid ${C.line}`, background: rowBg }}>
                       <td className="py-2.5" style={{ color: C.ink }}>{t.name}</td>
-                      <td className="py-2.5 font-mono font-bold" style={{ color: status !== 'normal' ? C.critical : C.ink }}>{value} {t.unit}</td>
-                      <td className="py-2.5 font-mono text-xs" style={{ color: C.inkMuted }}><bdi dir="ltr">{r.min}–{r.max} {t.unit}</bdi></td>
-                      <td className="py-2.5 w-28"><RangeGauge value={value} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} /></td>
-                      <td className="py-2.5"><ReportFlag value={value} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} /></td>
+                      <td className="py-2.5 font-mono font-bold" style={{ color: status !== 'normal' ? C.critical : C.ink }}>{isQual ? (QUALITATIVE_LABEL[value] || value) : `${value} ${t.unit}`}</td>
+                      <td className="py-2.5 font-mono text-xs" style={{ color: C.inkMuted }}>{isQual ? '—' : <bdi dir="ltr">{r.min}–{r.max} {t.unit}</bdi>}</td>
+                      <td className="py-2.5 w-28">{isQual ? <span style={{ color: C.inkFaint }}>—</span> : <RangeGauge value={value} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} />}</td>
+                      <td className="py-2.5">{isQual
+                        ? (status === 'abnormal' ? <span className="text-xs font-bold" style={{ color: C.critical }}>↑ يستدعي مراجعة الطبيب</span> : status === 'normal' ? <span className="text-xs font-bold" style={{ color: C.normal }}>✓ ضمن المعدل</span> : <span style={{ color: C.inkFaint }}>—</span>)
+                        : <ReportFlag value={value} min={r.min} max={r.max} critLow={r.critLow} critHigh={r.critHigh} />}</td>
                     </tr>
                   );
                 })}
