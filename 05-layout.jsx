@@ -19,9 +19,13 @@ const NAV = [
 ];
 
 const MANAGER_ONLY_NAV_KEYS = ['treasury', 'financial-reports'];
+const NAV_PERMISSION_KEY = { treasury: 'view_treasury', 'financial-reports': 'view_financial_reports' };
 
-function Sidebar({ view, setView, displayName, role, isManager, labName, logoSrc, onLogout, onExport, saveError }) {
-  const items = NAV.filter((item) => isManager || !MANAGER_ONLY_NAV_KEYS.includes(item.key));
+function Sidebar({ view, setView, displayName, role, isManager, can, labName, logoSrc, onLogout, onExport, saveError }) {
+  const items = NAV.filter((item) => {
+    if (!MANAGER_ONLY_NAV_KEYS.includes(item.key)) return true;
+    return isManager || (can && can(NAV_PERMISSION_KEY[item.key]));
+  });
   return (
     <div className="w-56 shrink-0 h-full flex flex-col" style={{ background: C.surface, borderLeft: `1px solid ${C.line}` }}>
       <div className="px-5 py-5" style={{ borderBottom: `1px solid ${C.line}` }}>
