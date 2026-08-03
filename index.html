@@ -99,12 +99,13 @@
         }
       }
 
-      // تحويل الأكواد وتنفيذها
+          // تحويل الأكواد وتنفيذها
       try {
         const transformed = Babel.transform(combinedCode, {
-          presets: ['react'],
+          presets: [['react', { runtime: 'classic' }]],
           sourceType: 'script'
         }).code;
+
 
         const scriptEl = document.createElement('script');
         scriptEl.text = transformed;
