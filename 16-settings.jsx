@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, can }) {
   const canManage = isManager || (can && can('manage_catalog'));
-  const blank = { name: '', category: '', unit: '', min: '', max: '', price: '', differentForFemale: false, minF: '', maxF: '', criticalLow: '', criticalHigh: '', consumesItemId: '', consumesQty: '1' };
+  const blank = { name: '', category: '', unit: '', min: '', max: '', price: '', differentForFemale: false, minF: '', maxF: '', criticalLow: '', criticalHigh: '', consumesItemId: '', consumesQty: '1', valueType: 'numeric', qualitativeAbnormal: '' };
   const existingCategories = [...new Set(catalog.map((c) => c.category || 'Other'))].sort();
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
@@ -20,6 +20,7 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, 
       criticalLow: t.critical_low !== null && t.critical_low !== undefined ? String(t.critical_low) : '',
       criticalHigh: t.critical_high !== null && t.critical_high !== undefined ? String(t.critical_high) : '',
       consumesItemId: t.consumes_item_id || '', consumesQty: t.consumes_qty ? String(t.consumes_qty) : '1',
+      valueType: t.value_type || 'numeric', qualitativeAbnormal: t.qualitative_abnormal_value || '',
     });
     setError('');
   };
@@ -27,18 +28,30 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, 
   const submit = async () => {
     if (!form.name.trim()) { setError('اسم الفحص مطلوب'); return; }
     if (!form.category.trim()) { setError('فئة الفحص مطلوبة (مثال: Hematology (CBC))'); return; }
-    const min = Number(form.min), max = Number(form.max), price = Number(form.price);
-    if (isNaN(min) || isNaN(max) || min >= max) { setError('يجب أن يكون الحد الأدنى أصغر من الحد الأقصى'); return; }
+    const price = Number(form.price);
     if (isNaN(price) || price < 0) { setError('السعر يجب أن يكون رقماً موجباً'); return; }
-    const payload = {
-      name: form.name.trim(), category: form.category.trim(), unit: form.unit.trim(), min, max, price,
-      min_female: form.differentForFemale ? Number(form.minF || min) : null,
-      max_female: form.differentForFemale ? Number(form.maxF || max) : null,
-      critical_low: form.criticalLow !== '' ? Number(form.criticalLow) : null,
-      critical_high: form.criticalHigh !== '' ? Number(form.criticalHigh) : null,
-      consumes_item_id: form.consumesItemId || null,
-      consumes_qty: form.consumesItemId ? Number(form.consumesQty) || 1 : null,
-    };
+    let payload;
+    if (form.valueType === 'qualitative') {
+      payload = {
+        name: form.name.trim(), category: form.category.trim(), unit: '', min: 0, max: 0, price,
+        min_female: null, max_female: null, critical_low: null, critical_high: null,
+        consumes_item_id: form.consumesItemId || null, consumes_qty: form.consumesItemId ? Number(form.consumesQty) || 1 : null,
+        value_type: 'qualitative', qualitative_abnormal_value: form.qualitativeAbnormal || null,
+      };
+    } else {
+      const min = Number(form.min), max = Number(form.max);
+      if (isNaN(min) || isNaN(max) || min >= max) { setError('يجب أن يكون الحد الأدنى أصغر من الحد الأقصى'); return; }
+      payload = {
+        name: form.name.trim(), category: form.category.trim(), unit: form.unit.trim(), min, max, price,
+        min_female: form.differentForFemale ? Number(form.minF || min) : null,
+        max_female: form.differentForFemale ? Number(form.maxF || max) : null,
+        critical_low: form.criticalLow !== '' ? Number(form.criticalLow) : null,
+        critical_high: form.criticalHigh !== '' ? Number(form.criticalHigh) : null,
+        consumes_item_id: form.consumesItemId || null,
+        consumes_qty: form.consumesItemId ? Number(form.consumesQty) || 1 : null,
+        value_type: 'numeric', qualitative_abnormal_value: null,
+      };
+    }
     if (editingId) await actions.updateTest(editingId, payload); else await actions.addTest(payload);
     resetForm();
   };
@@ -52,17 +65,33 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, 
   return (
     <div className="space-y-5">
       {canManage && <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <Field label="نوع القيمة">
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setForm({ ...form, valueType: 'numeric' })} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ background: form.valueType === 'numeric' ? C.accent : C.bg, color: form.valueType === 'numeric' ? '#fff' : C.inkMuted, border: `1px solid ${form.valueType === 'numeric' ? C.accent : C.line}` }}>رقمي (بمعدل طبيعي)</button>
+            <button type="button" onClick={() => setForm({ ...form, valueType: 'qualitative' })} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ background: form.valueType === 'qualitative' ? C.accent : C.bg, color: form.valueType === 'qualitative' ? '#fff' : C.inkMuted, border: `1px solid ${form.valueType === 'qualitative' ? C.accent : C.line}` }}>نوعي (إيجابي / سلبي)</button>
+          </div>
+        </Field>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <Field label="اسم الفحص"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
           <Field label="الفئة (Category)">
             <input list="test-categories-list" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Hematology (CBC)..." className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} />
             <datalist id="test-categories-list">{existingCategories.map((c) => <option key={c} value={c} />)}</datalist>
           </Field>
-          <Field label="الوحدة"><input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
-          <Field label="الحد الأدنى"><input type="number" step="any" value={form.min} onChange={(e) => setForm({ ...form, min: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
-          <Field label="الحد الأقصى"><input type="number" step="any" value={form.max} onChange={(e) => setForm({ ...form, max: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+          {form.valueType === 'numeric' && <Field label="الوحدة"><input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>}
+          {form.valueType === 'numeric' && <Field label="الحد الأدنى"><input type="number" step="any" value={form.min} onChange={(e) => setForm({ ...form, min: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>}
+          {form.valueType === 'numeric' && <Field label="الحد الأقصى"><input type="number" step="any" value={form.max} onChange={(e) => setForm({ ...form, max: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>}
           <Field label="السعر"><input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
         </div>
+        {form.valueType === 'qualitative' && (
+          <Field label="القيمة التي تُعتبر غير طبيعية (اختياري — لتمييزها في التقرير)">
+            <select value={form.qualitativeAbnormal} onChange={(e) => setForm({ ...form, qualitativeAbnormal: e.target.value })} className="w-full max-w-xs px-3 py-2 rounded-md text-sm" style={inputStyle}>
+              <option value="">بدون تمييز</option>
+              <option value="Positive">إيجابي (Positive)</option>
+              <option value="Negative">سلبي (Negative)</option>
+            </select>
+          </Field>
+        )}
+        {form.valueType === 'numeric' && (<>
         <label className="flex items-center gap-2 text-sm" style={{ color: C.ink }}><input type="checkbox" checked={form.differentForFemale} onChange={(e) => setForm({ ...form, differentForFemale: e.target.checked })} /> معدل مختلف للإناث</label>
         {form.differentForFemale && (
           <div className="grid grid-cols-2 gap-3">
@@ -74,6 +103,7 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, 
           <Field label="الحد الحرج الأدنى (اختياري)"><input type="number" step="any" value={form.criticalLow} onChange={(e) => setForm({ ...form, criticalLow: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
           <Field label="الحد الحرج الأعلى (اختياري)"><input type="number" step="any" value={form.criticalHigh} onChange={(e) => setForm({ ...form, criticalHigh: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
         </div>
+        </>)}
         <div className="grid grid-cols-2 gap-3">
           <Field label="يستهلك من المخزون (اختياري)">
             <select value={form.consumesItemId} onChange={(e) => setForm({ ...form, consumesItemId: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
@@ -104,7 +134,11 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, 
                 {tests.map((c) => (
                   <tr key={c.id} style={{ borderBottom: `1px solid ${C.line}` }}>
                     <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{c.name}</td>
-                    <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}><bdi dir="ltr">{c.min}–{c.max} {c.unit}</bdi>{c.min_female !== null && c.min_female !== undefined ? ' (حسب الجنس)' : ''}</td>
+                    <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>
+                      {c.value_type === 'qualitative'
+                        ? <span>نوعي (إيجابي/سلبي){c.qualitative_abnormal_value ? ` — غير طبيعي: ${QUALITATIVE_LABEL[c.qualitative_abnormal_value]}` : ''}</span>
+                        : <><bdi dir="ltr">{c.min}–{c.max} {c.unit}</bdi>{c.min_female !== null && c.min_female !== undefined ? ' (حسب الجنس)' : ''}</>}
+                    </td>
                     <td className="px-4 py-3 font-mono whitespace-nowrap" style={{ color: C.ink }}>{SAR(c.price)}</td>
                     <td className="px-4 py-3 whitespace-nowrap">{canManage && <div className="flex items-center gap-3"><button onClick={() => startEdit(c)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button><button onClick={() => onDelete(c)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button></div>}</td>
                   </tr>
