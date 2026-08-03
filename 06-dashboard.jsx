@@ -133,9 +133,11 @@ function Dashboard({ data, setView, setActiveOrderId, onQuickAction, isManager, 
     Object.entries(o.results || {}).forEach(([testId, value]) => {
       const test = catalog.find((c) => c.id === testId);
       if (!test) return;
-      const r = resolveTestRanges(test, patient);
-      const status = classifyValue(value, r);
-      if (status === 'abnormal' || status === 'critical') flagged.push({ patient: patient?.name, test, value, r, critical: status === 'critical' });
+      const status = classifyResult(value, test, patient);
+      if (status === 'abnormal' || status === 'critical') {
+        const r = test.value_type === 'qualitative' ? null : resolveTestRanges(test, patient);
+        flagged.push({ patient: patient?.name, test, value, r, critical: status === 'critical' });
+      }
     });
   });
   const criticalCount = flagged.filter((f) => f.critical).length;
@@ -165,7 +167,9 @@ function Dashboard({ data, setView, setActiveOrderId, onQuickAction, isManager, 
               {flagged.slice(0, 5).map((a, idx) => (
                 <div key={idx} className="flex items-center justify-between gap-3 pb-2" style={{ borderBottom: `1px solid ${C.line}` }}>
                   <div className="min-w-0"><div className="text-sm font-bold truncate" style={{ color: C.ink }}>{a.patient}</div><div className="text-xs truncate" style={{ color: C.inkMuted }}>{a.test.name}</div></div>
-                  <Flag value={a.value} min={a.r.min} max={a.r.max} critLow={a.r.critLow} critHigh={a.r.critHigh} />
+                  {a.test.value_type === 'qualitative'
+                    ? <Badge tone="critical">{QUALITATIVE_LABEL[a.value] || a.value}</Badge>
+                    : <Flag value={a.value} min={a.r.min} max={a.r.max} critLow={a.r.critLow} critHigh={a.r.critHigh} />}
                 </div>
               ))}
             </div>
