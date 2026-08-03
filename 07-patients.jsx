@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 // Patients
 // ---------------------------------------------------------------------------
-function PatientsView({ patients, orders, actions, askConfirm, onViewOrders, onViewHistory, isManager, can, pendingAction, clearPendingAction }) {
+function PatientsView({ patients, orders, actions, askConfirm, onViewOrders, onViewHistory, onViewStatement, isManager, can, pendingAction, clearPendingAction }) {
   const canDelete = isManager || (can && can('delete_patients'));
   const [showForm, setShowForm] = useState(false);
   useEffect(() => {
@@ -82,6 +82,7 @@ function PatientsView({ patients, orders, actions, askConfirm, onViewOrders, onV
                   <div className="flex items-center gap-3">
                     <button onClick={() => onViewOrders(p.id)} className="text-xs font-bold" style={{ color: C.accent }}>الطلبات</button>
                     <button onClick={() => onViewHistory(p.id)} className="text-xs font-bold" style={{ color: C.accent }}>السجل</button>
+                    <button onClick={() => onViewStatement(p.id)} className="text-xs font-bold" style={{ color: C.accent }}>كشف حساب</button>
                     <button onClick={() => startEdit(p)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>
                     {canDelete && <button onClick={() => onDelete(p)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>}
                   </div>
@@ -109,13 +110,21 @@ function PatientHistoryView({ patient, orders, catalog, setView, setActiveOrderI
   const completed = visits.filter((o) => o.status === 'completed').slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
   const byTest = {};
+  const qualByTest = {};
   completed.forEach((o) => {
     Object.entries(o.results || {}).forEach(([testId, value]) => {
+      const test = catalog.find((c) => c.id === testId);
+      if (test && test.value_type === 'qualitative') {
+        if (!qualByTest[testId]) qualByTest[testId] = [];
+        qualByTest[testId].push({ date: o.created_at, value, sampleId: o.sample_id });
+        return;
+      }
       if (!byTest[testId]) byTest[testId] = [];
       byTest[testId].push({ date: o.created_at, value, sampleId: o.sample_id });
     });
   });
   const testIds = Object.keys(byTest);
+  const qualTestIds = Object.keys(qualByTest);
 
   const openReport = (orderId) => { setActiveOrderId(orderId); setView('report'); };
 
@@ -201,6 +210,113 @@ function PatientHistoryView({ patient, orders, catalog, setView, setActiveOrderI
             </div>
           )}
         </div>
+
+        {qualTestIds.length > 0 && (
+          <div>
+            <div className="font-bold text-sm mb-3" style={{ color: C.ink }}>سجل الفحوصات النوعية (إيجابي/سلبي)</div>
+            <div className="space-y-3">
+              {qualTestIds.map((testId) => {
+                const test = catalog.find((c) => c.id === testId);
+                if (!test) return null;
+                return (
+                  <div key={testId} className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}`, breakInside: 'avoid' }}>
+                    <div className="font-bold text-sm mb-2" style={{ color: C.ink }}>{test.name}</div>
+                    <div className="space-y-1.5">
+                      {qualByTest[testId].map((pt, idx) => {
+                        const status = classifyResult(pt.value, test, patient);
+                        return (
+                          <div key={idx} className="flex items-center justify-between text-sm">
+                            <div className="font-mono text-xs" style={{ color: C.inkMuted }}>{fmtDate(pt.date)}</div>
+                            <Badge tone={status === 'abnormal' ? 'critical' : 'normal'}>{QUALITATIVE_LABEL[pt.value] || pt.value}</Badge>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// كشف حساب المريض — قابل للطباعة
+// ---------------------------------------------------------------------------
+function PatientStatementView({ patient, orders, invoices, labSettings, onBack }) {
+  if (!patient) return <div className="p-6"><EmptyState text="لم يتم تحديد مريض" /></div>;
+  const patientOrderIds = new Set(orders.filter((o) => o.patient_id === patient.id).map((o) => o.id));
+  const patientInvoices = invoices.filter((inv) => patientOrderIds.has(inv.order_id) && !inv.voided);
+
+  const events = [];
+  patientInvoices.forEach((inv) => {
+    const order = orders.find((o) => o.id === inv.order_id);
+    events.push({ date: inv.created_at, desc: `فاتورة فحوصات${order ? ' — ' + order.sample_id : ''}`, debit: Number(inv.amount), credit: 0 });
+    (inv.payments || []).forEach((pay) => {
+      events.push({ date: pay.created_at, desc: `دفعة (${pay.method})`, debit: 0, credit: Number(pay.amount) });
+    });
+  });
+  events.sort((a, b) => new Date(a.date) - new Date(b.date));
+  let running = 0;
+  const rows = events.map((e) => { running += e.debit - e.credit; return { ...e, balance: running }; });
+  const totalDebit = events.reduce((s, e) => s + e.debit, 0);
+  const totalCredit = events.reduce((s, e) => s + e.credit, 0);
+
+  return (
+    <div className="p-6 space-y-5">
+      <div className="flex items-center justify-between no-print flex-wrap gap-3">
+        <button onClick={onBack} className="text-sm font-bold" style={{ color: C.accent }}>‹ رجوع للمرضى</button>
+        <button onClick={() => window.print()} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>طباعة / PDF</button>
+      </div>
+      <div className="printable-area rounded-lg p-5 md:p-8" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <div className="flex items-center justify-between flex-wrap gap-2 pb-4 mb-4" style={{ borderBottom: `2px solid ${C.ink}` }}>
+          <div className="flex items-center gap-3">
+            <img src={labSettings?.logo_b64 || LOGO_B64} alt="شعار" style={{ height: 44, width: 'auto' }} />
+            <div>
+              <div className="text-lg font-bold" style={{ color: C.ink }}>{labSettings?.name || 'مختبر الشموخ'}</div>
+              <div className="text-xs" style={{ color: C.inkMuted }}>كشف حساب مريض</div>
+            </div>
+          </div>
+          <div className="text-left text-xs font-mono" style={{ color: C.inkMuted }}>تاريخ الإصدار: {fmtDate(new Date().toISOString())}</div>
+        </div>
+        <div className="mb-5 text-sm">
+          <div><span style={{ color: C.inkMuted }}>المريض: </span><span className="font-bold" style={{ color: C.ink }}>{patient.name}</span></div>
+          {patient.phone && <div><span style={{ color: C.inkMuted }}>الهاتف: </span><span className="font-mono" style={{ color: C.ink }}>{patient.phone}</span></div>}
+        </div>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `2px solid ${C.ink}` }}>
+            <th className="text-right py-2 font-bold" style={{ color: C.inkMuted }}>التاريخ</th>
+            <th className="text-right py-2 font-bold" style={{ color: C.inkMuted }}>البيان</th>
+            <th className="text-right py-2 font-bold" style={{ color: C.inkMuted }}>مدين (على المريض)</th>
+            <th className="text-right py-2 font-bold" style={{ color: C.inkMuted }}>دائن (سُدّد)</th>
+            <th className="text-right py-2 font-bold" style={{ color: C.inkMuted }}>الرصيد</th>
+          </tr></thead>
+          <tbody>
+            {rows.map((r, idx) => (
+              <tr key={idx} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="py-2 font-mono text-xs" style={{ color: C.inkMuted }}>{fmtDate(r.date)}</td>
+                <td className="py-2" style={{ color: C.ink }}>{r.desc}</td>
+                <td className="py-2 font-mono" style={{ color: r.debit ? C.critical : C.inkFaint }}>{r.debit ? SAR(r.debit) : '—'}</td>
+                <td className="py-2 font-mono" style={{ color: r.credit ? C.normal : C.inkFaint }}>{r.credit ? SAR(r.credit) : '—'}</td>
+                <td className="py-2 font-mono font-bold" style={{ color: C.ink }}>{SAR(r.balance)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && <tr><td colSpan={5}><EmptyState text="لا توجد عمليات مسجّلة لهذا المريض" /></td></tr>}
+          </tbody>
+          {rows.length > 0 && (
+            <tfoot>
+              <tr style={{ borderTop: `2px solid ${C.ink}` }}>
+                <td colSpan={2} className="py-2 font-bold" style={{ color: C.ink }}>الإجمالي</td>
+                <td className="py-2 font-mono font-bold" style={{ color: C.critical }}>{SAR(totalDebit)}</td>
+                <td className="py-2 font-mono font-bold" style={{ color: C.normal }}>{SAR(totalCredit)}</td>
+                <td className="py-2 font-mono font-bold" style={{ color: C.ink }}>{SAR(running)}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
       </div>
     </div>
   );
