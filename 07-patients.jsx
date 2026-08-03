@@ -3,8 +3,12 @@
 // ---------------------------------------------------------------------------
 // Patients
 // ---------------------------------------------------------------------------
-function PatientsView({ patients, orders, actions, askConfirm, onViewOrders, onViewHistory, isManager }) {
+function PatientsView({ patients, orders, actions, askConfirm, onViewOrders, onViewHistory, isManager, can, pendingAction, clearPendingAction }) {
+  const canDelete = isManager || (can && can('delete_patients'));
   const [showForm, setShowForm] = useState(false);
+  useEffect(() => {
+    if (pendingAction === 'new-patient') { setShowForm(true); clearPendingAction(); }
+  }, [pendingAction]);
   const [query, setQuery] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ name: '', age: '', gender: 'ذكر', phone: '' });
@@ -79,7 +83,7 @@ function PatientsView({ patients, orders, actions, askConfirm, onViewOrders, onV
                     <button onClick={() => onViewOrders(p.id)} className="text-xs font-bold" style={{ color: C.accent }}>الطلبات</button>
                     <button onClick={() => onViewHistory(p.id)} className="text-xs font-bold" style={{ color: C.accent }}>السجل</button>
                     <button onClick={() => startEdit(p)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>
-                    {isManager && <button onClick={() => onDelete(p)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>}
+                    {canDelete && <button onClick={() => onDelete(p)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>}
                   </div>
                 </td>
               </tr>
