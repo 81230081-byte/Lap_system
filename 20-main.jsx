@@ -17,4 +17,8 @@ function Root() {
   return <AppShell key={session.user.id} session={session} />;
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <ErrorBoundary>
+    <Root />
+  </ErrorBoundary>
+);
