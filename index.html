@@ -10,7 +10,7 @@
 
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
 
@@ -37,7 +37,7 @@
 
   <!-- شاشة تنبيه الأخطاء -->
   <div id="debug-box" style="display:none;" class="m-4 p-4 bg-red-100 border-2 border-red-500 text-red-800 rounded-lg text-left font-mono text-sm dir-ltr"></div>
-  <div id="loading-hint">...جارِ تحميل النظام</div>
+  <div id="loading-hint">...جارِ تحميل النظام (قد يستغرق حتى 30 ثانية على شبكة بطيئة)</div>
 
   <!-- مكان عرض التطبيق -->
   <div id="root"></div>
@@ -46,7 +46,7 @@
   <script>
     // ينتظر توفّر متغيّر عام (مكتبة CDN) مع مهلة، بدل الفشل الفوري إذا تأخرت الشبكة
     function waitForGlobal(name, timeoutMs, intervalMs) {
-      timeoutMs = timeoutMs || 10000;
+      timeoutMs = timeoutMs || 30000;
       intervalMs = intervalMs || 200;
       return new Promise((resolve, reject) => {
         const start = Date.now();
