@@ -5,15 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>نظام إدارة مختبر الشموخ الطبي</title>
 
-  <!-- المكتبات الأساسية -->
+  <!-- التنسيقات والمكتبات الأساسية -->
   <script src="https://cdn.tailwindcss.com"></script>
+
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
 
-  <!-- تنسيقات الطباعة -->
+  <!-- تنسيقات الطباعة: تُخفي عناصر التحكم (no-print) وتُظهر منطقة التقرير فقط عند الطباعة -->
   <style>
     @media print {
       .no-print { display: none !important; }
@@ -22,42 +23,67 @@
       .printable-area, #report-area { position: absolute; top: 0; right: 0; left: 0; width: 100%; border: none !important; }
       .hidden.print\:block { display: block !important; }
     }
+    #debug-box button {
+      background: #B3402A; color: #fff; border: none; border-radius: 6px;
+      padding: 8px 18px; font-weight: bold; cursor: pointer; font-family: inherit;
+    }
+    #loading-hint {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-family: sans-serif; color: #5B665F; font-size: 14px; direction: rtl;
+    }
   </style>
 </head>
 <body class="bg-gray-100 text-gray-900 min-h-screen">
 
-  <!-- مربع عرض الأخطاء -->
-  <div id="debug-box" style="display:none;" class="m-4 p-4 bg-red-100 border-2 border-red-500 text-red-800 rounded-lg text-left font-mono text-sm dir-ltr whitespace-pre-wrap overflow-auto max-h-96"></div>
+  <!-- شاشة تنبيه الأخطاء -->
+  <div id="debug-box" style="display:none;" class="m-4 p-4 bg-red-100 border-2 border-red-500 text-red-800 rounded-lg text-left font-mono text-sm dir-ltr"></div>
+  <div id="loading-hint">...جارِ تحميل النظام</div>
 
   <!-- مكان عرض التطبيق -->
   <div id="root"></div>
 
+  <!-- سكريبت الدمج والتشغيل الموحد -->
   <script>
-    // 1. محاكي دالة require للمتصفح
-    window.require = function(moduleName) {
-      if (moduleName === 'react') return window.React;
-      if (moduleName === 'react-dom' || moduleName === 'react-dom/client') return window.ReactDOM;
-      if (moduleName === '@supabase/supabase-js' || moduleName === 'supabase') return window.supabase;
-      if (moduleName === 'lucide-react' || moduleName === 'lucide') return window.lucide;
-      return window[moduleName] || {};
-    };
-
-    // 2. دالة عرض الأخطاء
-    function showError(title, msg) {
-      const debugBox = document.getElementById('debug-box');
-      if (debugBox) {
-        debugBox.style.display = 'block';
-        debugBox.innerHTML = `<b style="color:red">[${title}]:</b><br><pre class="mt-2 text-xs overflow-auto">${msg}</pre>`;
-      }
+    // ينتظر توفّر متغيّر عام (مكتبة CDN) مع مهلة، بدل الفشل الفوري إذا تأخرت الشبكة
+    function waitForGlobal(name, timeoutMs, intervalMs) {
+      timeoutMs = timeoutMs || 10000;
+      intervalMs = intervalMs || 200;
+      return new Promise((resolve, reject) => {
+        const start = Date.now();
+        const check = () => {
+          if (typeof window[name] !== 'undefined') return resolve();
+          if (Date.now() - start > timeoutMs) {
+            return reject(new Error(`تعذر تحميل مكتبة "${name}" — الشبكة بطيئة أو غير مستقرة. تحقق من الاتصال (يفضّل واي فاي) وأعد المحاولة.`));
+          }
+          setTimeout(check, intervalMs);
+        };
+        check();
+      });
     }
 
-    // 3. التقاط أخطاء التشغيل المباشرة
-    window.addEventListener('error', function(e) {
-      showError('خطأ أثناء التشغيل (Runtime Error)', e.message + (e.filename ? `\nالموقع: ${e.filename}:${e.lineno}` : ''));
-    });
+    // يجلب ملفاً نصياً مع إعادة محاولة تلقائية عند فشل الشبكة المؤقت
+    async function fetchWithRetry(url, retries, delayMs) {
+      retries = retries || 4;
+      delayMs = delayMs || 900;
+      let lastErr;
+      for (let i = 0; i < retries; i++) {
+        try {
+          const res = await fetch(url, { cache: 'no-store' });
+          if (!res.ok) throw new Error(`رمز الخطأ: ${res.status}`);
+          return await res.text();
+        } catch (err) {
+          lastErr = err;
+          if (i < retries - 1) await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+        }
+      }
+      throw new Error(`تعذر تحميل الملف: ${url} (${lastErr.message})`);
+    }
 
     async function launchApp() {
-      // قائمة كافة ملفات النظام
+      const debugBox = document.getElementById('debug-box');
+      const loadingHint = document.getElementById('loading-hint');
+
+      // قائمة كافة ملفات النظام بالترتيب الصحيح
       const files = [
         '01-config.js',
         '02-helpers.js',
@@ -78,44 +104,44 @@
         '17-app-shell.jsx',
         '19-appointments.jsx',
         '21-quality-control.jsx',
-        '20-main.jsx'
+        '20-main.jsx' // يجب أن يكون الملف الرئيسي في النهاية
       ];
 
-      let combinedCode = '';
-
-      // جلب وقراءة كافة الملفات
-      for (const file of files) {
-        try {
-          const res = await fetch('./' + file + '?v=' + Date.now());
-          if (!res.ok) {
-            showError('خطأ تحميل ملف', `تعذر جلب الملف: ${file} (رمز الاستجابة: ${res.status})`);
-            return;
-          }
-          const content = await res.text();
-          combinedCode += `\n/* --- File: ${file} --- */\n` + content;
-        } catch (err) {
-          showError('خطأ في الشبكة', `فشل اتصال جلب الملف: ${file}\n${err.message}`);
-          return;
-        }
-      }
-
-          // تحويل الأكواد وتنفيذها
       try {
-        const transformed = Babel.transform(combinedCode, {
-          presets: [['react', { runtime: 'classic' }]],
-          sourceType: 'script'
+        // الخطوة 1: تأكد من اكتمال تحميل المكتبات الخارجية (تتحمّل بطء الشبكة تلقائياً)
+        await waitForGlobal('React');
+        await waitForGlobal('ReactDOM');
+        await waitForGlobal('Babel');
+        await waitForGlobal('supabase');
+
+        // الخطوة 2: جلب وقراءة كافة ملفات النظام (مع إعادة محاولة لكل ملف عند فشل الشبكة)
+        let combinedCode = '';
+        for (const file of files) {
+          const text = await fetchWithRetry('./' + file);
+          combinedCode += `\n/* --- File: ${file} --- */\n` + text;
+        }
+
+        // الخطوة 3: تحويل الكود المدمج عبر Babel
+        const transpiledCode = Babel.transform(combinedCode, {
+          presets: ['react']
         }).code;
 
+        // الخطوة 4: تنفيذ الكود داخل المتصفح
+        loadingHint.remove();
+        const scriptElement = document.createElement('script');
+        scriptElement.text = transpiledCode;
+        document.body.appendChild(scriptElement);
 
-        const scriptEl = document.createElement('script');
-        scriptEl.text = transformed;
-        document.body.appendChild(scriptEl);
-      } catch (babelErr) {
-        showError('خطأ في بناء الأكواد (Babel Syntax Error)', babelErr.message);
+      } catch (err) {
+        loadingHint.remove();
+        debugBox.style.display = 'block';
+        debugBox.innerHTML =
+          `<b style="color:red">فشل تشغيل النظام:</b><br><br>${err.message}` +
+          `<br><br><button onclick="location.reload()">إعادة المحاولة</button>`;
       }
     }
 
-    // بدء التشغيل
+    // بدء التشغيل عند اكتمال تحميل الصفحة
     window.addEventListener('DOMContentLoaded', launchApp);
   </script>
 </body>
