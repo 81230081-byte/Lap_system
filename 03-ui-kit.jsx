@@ -131,6 +131,39 @@ function PaginationBar({ page, totalPages, setPage }) {
 }
 
 // ---------------------------------------------------------------------------
+// حاجز الأخطاء (Error Boundary): يمنع أي خطأ برمجي غير متوقع من تفضية الشاشة
+// بالكامل. يعرض رسالة واضحة وزر "إعادة تحميل" بدل شاشة بيضاء صامتة.
+// ---------------------------------------------------------------------------
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error('حدث خطأ غير متوقع بالواجهة:', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div dir="rtl" className="h-screen w-full flex items-center justify-center p-4" style={{ background: C.bg }}>
+          <div className="w-full max-w-md rounded-lg p-6 text-center" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+            <div className="text-3xl mb-2">⚠️</div>
+            <div className="text-lg font-bold mb-2" style={{ color: C.ink }}>حدث خطأ غير متوقع بهذا الجزء من الشاشة</div>
+            <div className="text-sm mb-4" style={{ color: C.inkMuted }}>لا داعي للقلق — بياناتك المحفوظة بالنظام لم تتأثر. حاول إعادة تحميل الصفحة.</div>
+            <button onClick={() => window.location.reload()} className="px-4 py-2.5 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>إعادة تحميل الصفحة</button>
+            <div className="text-xs mt-4 font-mono text-left dir-ltr" style={{ color: C.inkFaint, wordBreak: 'break-word' }}>{String(this.state.error?.message || this.state.error || '')}</div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // رسوم بيانية خفيفة بـ SVG (بدون مكتبات خارجية) لعرضها في لوحة تحكم المدير
 // ---------------------------------------------------------------------------
 function BarChart({ data, height = 180, valueFormatter, barColor }) {
