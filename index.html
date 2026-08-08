@@ -53,7 +53,7 @@
         const check = () => {
           if (typeof window[name] !== 'undefined') return resolve();
           if (Date.now() - start > timeoutMs) {
-            return reject(new Error(`تعذر تحميل مكتبة "${name}" — الشبكة بطيئة أو غير مستقرة. تحقق من الاتصال (يفضّل واي فاي) وأعد المحاولة.`));
+            return reject(new Error(`تعذر تحميل مكتبة "${name}" — الشبكة بطيئة أو غير مستقرة. تحقق من الاتصال (يفضّل واي فاي) وأعد[...]`));
           }
           setTimeout(check, intervalMs);
         };
@@ -121,9 +121,11 @@
           combinedCode += `\n/* --- File: ${file} --- */\n` + text;
         }
 
-        // الخطوة 3: تحويل الكود المدمج عبر Babel
+        // الخطوة 3: تحويل الكود المدمج عبر Babel (classic runtime)
         const transpiledCode = Babel.transform(combinedCode, {
-          presets: ['react']
+          presets: [['react', { runtime: 'classic' }]],
+          sourceType: 'script',
+          parserOpts: { sourceType: 'script' }
         }).code;
 
         // الخطوة 4: تنفيذ الكود داخل المتصفح
