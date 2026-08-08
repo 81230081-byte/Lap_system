@@ -14,7 +14,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
 
-  <!-- تنسيقات الطباعة: تُخفي عناصر التحكم (no-print) وتُظهر منطقة التقرير فقط عند الطباعة -->
   <style>
     @media print {
       .no-print { display: none !important; }
@@ -24,405 +23,128 @@
       .hidden.print\:block { display: block !important; }
     }
 
-    /* صندوق الأخطاء: يغطي الشاشة حتى لو فشل التطبيق بالكامل */
-    #debug-box {
-      display: none;
-      position: fixed;
-      inset: 16px;
-      z-index: 99999;
-      background: rgba(255, 255, 255, 0.98);
-      border: 2px solid #f87171; /* red-400 */
-      color: #991b1b; /* red-700 */
-      border-radius: 8px;
-      padding: 18px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.12);
-      overflow: auto;
-      direction: rtl;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Helvetica Neue", monospace;
-      font-size: 13px;
-      line-height: 1.4;
-    }
-
-    #debug-box .actions { margin-top: 12px; display:flex; gap:8px; justify-content: flex-start; }
-    #debug-box button { background: #B3402A; color: #fff; border: none; border-radius: 6px; padding: 8px 14px; font-weight: bold; cursor: pointer; font-family: inherit; }
-    #debug-box pre { background: #111827; color: #e5e7eb; padding: 10px; border-radius: 6px; overflow:auto; white-space: pre-wrap; word-break: break-word; direction: ltr; }
-
-    #loading-hint {
-      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-      font-family: sans-serif; color: #5B665F; font-size: 14px; direction: rtl;
-    }
+    #debug-box { display:none; position: fixed; inset: 16px; z-index: 99999; background: rgba(255,255,255,0.98); border: 2px solid #f87171; color:#991b1b; border-radius:8px; padding:18px; box-shadow:0 10px 30px rgba(0,0,0,0.12); overflow:auto; direction: rtl; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace; font-size:13px; }
+    #debug-box .actions { margin-top:12px; display:flex; gap:8px; justify-content:flex-start; }
+    #debug-box button { background:#B3402A; color:#fff; border:none; border-radius:6px; padding:8px 14px; font-weight:700; cursor:pointer; }
+    #debug-box pre { background:#111827; color:#e5e7eb; padding:10px; border-radius:6px; overflow:auto; white-space:pre-wrap; word-break:break-word; direction:ltr; }
+    #loading-hint { position: fixed; inset:0; display:flex; align-items:center; justify-content:center; font-family:sans-serif; color:#5B665F; font-size:14px; direction:rtl; }
   </style>
 </head>
 <body class="bg-gray-100 text-gray-900 min-h-screen">
-
-  <!-- شاشة تنبيه الأخطاء -->
   <div id="debug-box" role="alert" aria-live="assertive"></div>
   <div id="loading-hint">...جارِ تحميل النظام (قد يستغرق حتى 30 ثانية على شبكة بطيئة)</div>
-
-  <!-- مكان عرض التطبيق -->
   <div id="root"></div>
 
-  <!-- سكريبت الدمج والتشغيل الموحد -->
   <script>
-    // Small utility to safely escape text when needed (we prefer textContent but keep for completeness)
-    function escapeHtml(str) {
-      if (str == null) return '';
-      return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/\"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-    }
-
-    // Build a robust error panel and show it. Avoid innerHTML for untrusted content.
-    function showErrorPanel(info) {
-      try {
+    function showErrorPanel(info){
+      try{
         const box = document.getElementById('debug-box');
-        if (!box) return console.error('debug-box not found', info);
-        // replaceChildren is safer than innerHTML = ''
+        if(!box) return console.error('debug-box not found', info);
         box.replaceChildren();
         box.style.display = 'block';
-
-        const title = document.createElement('div');
-        title.style.fontSize = '16px';
-        title.style.marginBottom = '8px';
-        title.style.fontWeight = '700';
-        title.textContent = 'حدث خطأ أثناء تشغيل التطبيق';
-        box.appendChild(title);
-
+        const title = document.createElement('div'); title.style.fontSize='16px'; title.style.marginBottom='8px'; title.style.fontWeight='700'; title.textContent='تشخيص: CommonJS / require'; box.appendChild(title);
         const list = document.createElement('div');
+        function addRow(label, value, isPre){ const row = document.createElement('div'); row.style.marginBottom='8px'; const lab = document.createElement('div'); lab.style.fontWeight='600'; lab.style.display='inline-block'; lab.style.minWidth='110px'; lab.textContent = label + ':'; row.appendChild(lab); if(isPre){ const pre = document.createElement('pre'); pre.textContent = value==null?'':value; row.appendChild(pre);} else { const span = document.createElement('span'); span.style.marginRight='8px'; span.textContent = value==null?'':value; row.appendChild(span);} list.appendChild(row); }
 
-        function addRow(label, value, isPre) {
-          const row = document.createElement('div');
-          row.style.marginBottom = '6px';
+        addRow('النتيجة', info.message || '');
+        if(info.foundInTranspiled != null) addRow('في transpiledCode', info.foundInTranspiled ? 'نعم' : 'لا');
+        if(info.foundInCombined != null) addRow('في combinedCode', info.foundInCombined ? 'نعم' : 'لا');
+        if(info.filename) addRow('الملف المصدر', info.filename);
+        if(info.lineno != null || info.colno != null) addRow('السطر:العمود', (info.lineno||'?')+':'+(info.colno||'?'));
+        if(info.line) addRow('السطر الكامل', info.line, true);
+        if(info.contextBefore) addRow('3 أسطر قبل', info.contextBefore, true);
+        if(info.contextAfter) addRow('3 أسطر بعد', info.contextAfter, true);
+        if(info.around) addRow('النص المحيط (±300 حرف)', info.around, true);
+        if(info.combinedAround) addRow('قبل Babel (±300 حرف)', info.combinedAround, true);
 
-          const lab = document.createElement('div');
-          lab.style.fontWeight = '600';
-          lab.style.display = 'inline-block';
-          lab.style.minWidth = '90px';
-          lab.textContent = label + ':';
-
-          row.appendChild(lab);
-
-          if (isPre) {
-            const pre = document.createElement('pre');
-            pre.textContent = value == null ? '' : value;
-            row.appendChild(pre);
-          } else {
-            const span = document.createElement('span');
-            span.style.marginRight = '6px';
-            span.textContent = value == null ? '' : value;
-            row.appendChild(span);
-          }
-          list.appendChild(row);
-        }
-
-        // Standard fields
-        addRow('نوع', info.type || 'خطأ جافاسكربت');
-        addRow('الرسالة', info.message || (info.error && info.error.message) || 'بدون رسالة');
-        if (info.filename) addRow('الملف', info.filename);
-        if (info.lineno != null || info.colno != null) addRow('السطر:العمود', (info.lineno || '?') + ':' + (info.colno || '?'));
-        if (info.stack) addRow('Stack Trace', info.stack, true);
-
-        // Resource loading info
-        if (info.resource) {
-          addRow('المورد', info.resource);
-          addRow('عنصر', info.targetTag || '');
-        }
-
-        // Raw object for debugging
-        if (info.raw) addRow('raw', typeof info.raw === 'string' ? info.raw : JSON.stringify(info.raw, Object.getOwnPropertyNames(info.raw || {}), 2), true);
-
-        box.appendChild(list);
-
-        const actions = document.createElement('div');
-        actions.className = 'actions';
-
-        const reloadBtn = document.createElement('button');
-        reloadBtn.textContent = 'إعادة تحميل الصفحة';
-        reloadBtn.onclick = function () { location.reload(); };
-        actions.appendChild(reloadBtn);
-
-        const copyBtn = document.createElement('button');
-        copyBtn.textContent = 'نسخ تفاصيل الخطأ';
-        copyBtn.onclick = function () {
-          const toCopy = JSON.stringify(info, Object.getOwnPropertyNames(info || {}), 2);
-          navigator.clipboard && navigator.clipboard.writeText(toCopy).then(function(){
-            copyBtn.textContent = 'تم النسخ';
-            setTimeout(()=> copyBtn.textContent = 'نسخ تفاصيل الخطأ', 2000);
-          }).catch(()=>{
-            // fallback
-            alert('تعذر نسخ التفاصيل — انسخها يدوياً');
-          });
-        };
-        actions.appendChild(copyBtn);
-
+        list.style.marginTop = '6px'; box.appendChild(list);
+        const actions = document.createElement('div'); actions.className='actions';
+        const reload = document.createElement('button'); reload.textContent='إعادة تحميل الصفحة'; reload.onclick = () => location.reload(); actions.appendChild(reload);
+        const copy = document.createElement('button'); copy.textContent='نسخ التفاصيل'; copy.onclick = () => { const toCopy = JSON.stringify(info, Object.getOwnPropertyNames(info||{}), 2); navigator.clipboard && navigator.clipboard.writeText(toCopy).then(()=>{ copy.textContent='تم النسخ'; setTimeout(()=>copy.textContent='نسخ التفاصيل',2000); }).catch(()=>{ alert('تعذر النسخ'); }); };
+        actions.appendChild(copy);
         box.appendChild(actions);
-
-        // Also log to console in structured way
-        try { console.error('Application error captured:', info); } catch (e) {}
-      } catch (e) {
-        // If the error overlay building itself fails, fallback to a minimal alert so user isn't left with white screen
-        try { alert('خطأ خطير: ' + (e && e.message)); } catch (e2) {}
-      }
+        console.error('Require diagnostic', info);
+      }catch(e){ console.error('failed to show diagnostic', e); }
     }
 
-    // Global handlers: catch runtime errors, resource load failures and unhandled promise rejections
-    window.addEventListener('error', function (event) {
-      try {
-        // Resource loading error: event.target is the failed element (script/link/img)
-        if (event.target && (event.target.src || event.target.href)) {
-          const resource = event.target.src || event.target.href;
-          showErrorPanel({
-            type: 'خطأ تحميل مورد',
-            message: 'فشل تحميل مورد (network/resource error)',
-            resource: resource,
-            targetTag: event.target.tagName,
-            raw: {
-              tagName: event.target.tagName,
-              outerHTML: (event.target && event.target.outerHTML) ? event.target.outerHTML : undefined
-            }
-          });
-          // prevent default browser logging duplication
-          event.preventDefault && event.preventDefault();
-          return;
-        }
+    function waitForGlobal(name, timeoutMs=30000, intervalMs=200){ return new Promise((resolve,reject)=>{ const start=Date.now(); const check=()=>{ if(typeof window[name] !== 'undefined') return resolve(); if(Date.now()-start>timeoutMs) return reject(new Error('تعذر تحميل مكتبة "'+name+'"')); setTimeout(check, intervalMs); }; check(); }); }
 
-        // JS runtime error
-        const info = {
-          type: 'خطأ وقت التشغيل',
-          message: event.message,
-          filename: event.filename,
-          lineno: event.lineno,
-          colno: event.colno,
-          stack: (event.error && event.error.stack) || null,
-          raw: event.error || null
-        };
-        showErrorPanel(info);
-        event.preventDefault && event.preventDefault();
-      } catch (e) {
-        console.error('error handler failed', e);
-      }
-    }, true);
+    async function fetchWithRetry(url, retries=4, delayMs=900){ let lastErr; for(let i=0;i<retries;i++){ try{ const res = await fetch(url,{cache:'no-store'}); if(!res.ok) throw new Error('رمز الخطأ: '+res.status); return await res.text(); }catch(err){ lastErr=err; if(i<retries-1) await new Promise(r=>setTimeout(r, delayMs*(i+1))); } } throw new Error('تعذر تحميل الملف: '+url+' ('+(lastErr&&lastErr.message)+')'); }
 
-    window.addEventListener('unhandledrejection', function (event) {
-      try {
-        const reason = event.reason;
-        let message = '';
-        let stack = null;
-        if (!reason) {
-          message = 'Unhandled rejection with no reason';
-        } else if (reason instanceof Error) {
-          message = reason.message;
-          stack = reason.stack;
-        } else {
-          try { message = JSON.stringify(reason); } catch (e) { message = String(reason); }
-        }
+    function splitCombinedByFile(combinedCode){ const parts = combinedCode.split(/\/\*\s--- File:\s*(.+?)\s--- \*\/[\r\n]?/); const files=[]; for(let i=1;i<parts.length;i+=2){ files.push({ filename: parts[i], content: parts[i+1]||'' }); } return files; }
+    function computeFileMapping(combinedCode, filesArray){ const mapping=[]; let lineCursor=1; for(const f of filesArray){ const markerSnippet='\n/* --- File: '+f.filename+' --- */\n'; const markerLines = markerSnippet.split(/\r?\n/).length; const contentLines = f.content.split(/\r?\n/).length; const startLine = lineCursor + markerLines - 1; const endLine = startLine + contentLines - 1; mapping.push({ filename: f.filename, startLine, endLine, lines: f.content.split(/\r?\n/) }); lineCursor = endLine + 1; } return mapping; }
 
-        showErrorPanel({
-          type: 'Unhandled Promise Rejection',
-          message: message,
-          stack: stack,
-          raw: reason
-        });
-        event.preventDefault && event.preventDefault();
-      } catch (e) {
-        console.error('unhandledrejection handler failed', e);
-      }
-    });
-
-    // ينتظر توفّر متغيّر عام (مكتبة CDN) مع مهلة، بدل الفشل الفوري إذا تأخرت الشبكة
-    function waitForGlobal(name, timeoutMs, intervalMs) {
-      timeoutMs = timeoutMs || 30000;
-      intervalMs = intervalMs || 200;
-      return new Promise((resolve, reject) => {
-        const start = Date.now();
-        const check = () => {
-          if (typeof window[name] !== 'undefined') return resolve();
-          if (Date.now() - start > timeoutMs) {
-            return reject(new Error(`تعذر تحميل مكتبة \"${name}\" — الشبكة بطيئة أو غير مستقرة. تحقق من الاتصال (يفضّل واي فاي) وأعد المحاولة.`));
-          }
-          setTimeout(check, intervalMs);
-        };
-        check();
-      });
-    }
-
-    // يجلب ملفاً نصياً مع إعادة محاولة تلقائية عند فشل الشبكة المؤقت
-    async function fetchWithRetry(url, retries, delayMs) {
-      retries = retries || 4;
-      delayMs = delayMs || 900;
-      let lastErr;
-      for (let i = 0; i < retries; i++) {
-        try {
-          const res = await fetch(url, { cache: 'no-store' });
-          if (!res.ok) throw new Error(`رمز الخطأ: ${res.status}`);
-          return await res.text();
-        } catch (err) {
-          lastErr = err;
-          if (i < retries - 1) await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
-        }
-      }
-      throw new Error(`تعذر تحميل الملف: ${url} (${lastErr && lastErr.message})`);
-    }
-
-    function splitCombinedByFile(combinedCode) {
-      // split using the marker /* --- File: filename --- */\n
-      const parts = combinedCode.split(/\/\*\s--- File:\s*(.+?)\s--- \*\/[\r\n]?/);
-      // resulting array: [prefix, filename1, content1, filename2, content2, ...]
-      const files = [];
-      for (let i = 1; i < parts.length; i += 2) {
-        const filename = parts[i];
-        const content = parts[i + 1] || '';
-        files.push({ filename, content });
-      }
-      return files;
-    }
-
-    function computeFileMapping(combinedCode, filesArray) {
-      // returns array of { filename, startLine, endLine, linesArray }
-      const mapping = [];
-      // we reconstruct each snippet exactly as it was appended in combinedCode
-      // combinedCode was built as: combinedCode += `\n/* --- File: ${file} --- */\n` + text;
-      let lineCursor = 1; // lines are 1-based
-      for (const f of filesArray) {
-        const markerSnippet = '\n/* --- File: ' + f.filename + ' --- */\n';
-        const markerLines = markerSnippet.split(/\r?\n/).length; // typically 3: '' line, marker line, ''
-        const contentLines = f.content.split(/\r?\n/).length;
-        const startLine = lineCursor + markerLines - 1; // first line of content
-        const endLine = startLine + contentLines - 1;
-        mapping.push({ filename: f.filename, startLine, endLine, lines: f.content.split(/\r?\n/) });
-        // advance cursor
-        lineCursor = endLine + 1;
-      }
-      return mapping;
-    }
-
-    async function launchApp() {
-      const debugBox = document.getElementById('debug-box');
+    async function launchApp(){
       const loadingHint = document.getElementById('loading-hint');
-
-      // قائمة كافة ملفات النظام بالترتيب الصحيح
-      const files = [
-        '01-config.js',
-        '02-helpers.js',
-        '03-ui-kit.jsx',
-        '04-login.jsx',
-        '05-layout.jsx',
-        '06-dashboard.jsx',
-        '07-patients.jsx',
-        '08-orders-results.jsx',
-        '09-inventory.jsx',
-        '10-suppliers-purchases.jsx',
-        '11-treasury.jsx',
-        '12-financial-reports.jsx',
-        '13-ledger-and-coa.jsx',
-        '14-billing.jsx',
-        '15-audit-log.jsx',
-        '16-settings.jsx',
-        '17-app-shell.jsx',
-        '19-appointments.jsx',
-        '21-quality-control.jsx',
-        '20-main.jsx' // يجب أن يكون الملف ا��رئيسي في النهاية
-      ];
-
-      try {
-        // الخطوة 1: تأكد من اكتمال تحميل المكتبات الخارجية (تتحمّل بطء الشبكة تلقائياً)
-        await waitForGlobal('React');
-        await waitForGlobal('ReactDOM');
-        await waitForGlobal('Babel');
-        await waitForGlobal('supabase');
-
-        // الخطوة 2: جلب وقراءة كافة ملفات النظام (مع إعادة محاولة لكل ملف عند فشل الشبكة)
+      const files = ['01-config.js','02-helpers.js','03-ui-kit.jsx','04-login.jsx','05-layout.jsx','06-dashboard.jsx','07-patients.jsx','08-orders-results.jsx','09-inventory.jsx','10-suppliers-purchases.jsx','11-treasury.jsx','12-financial-reports.jsx','13-ledger-and-coa.jsx','14-billing.jsx','15-audit-log.jsx','16-settings.jsx','17-app-shell.jsx','19-appointments.jsx','21-quality-control.jsx','20-main.jsx'];
+      try{
+        await waitForGlobal('React'); await waitForGlobal('ReactDOM'); await waitForGlobal('Babel'); await waitForGlobal('supabase');
         let combinedCode = '';
         const fetchedFiles = [];
-        for (const file of files) {
-          const text = await fetchWithRetry('./' + file);
-          fetchedFiles.push({ filename: file, content: text });
-          combinedCode += `\n/* --- File: ${file} --- */\n` + text;
-        }
-
-        // prepare mapping from combinedCode lines back to filenames
+        for(const file of files){ const text = await fetchWithRetry('./'+file); fetchedFiles.push({ filename: file, content: text }); combinedCode += '\n/* --- File: '+file+' --- */\n' + text; }
         const filesMapping = computeFileMapping(combinedCode, fetchedFiles);
 
-        // الخطوة 3: تحويل الكود المدمج عبر Babel بصيغة script (لا كموديل)
         let transpiledCode;
-        try {
-          transpiledCode = Babel.transform(combinedCode, {
-            presets: ['react'],
-            sourceType: 'script',
-            parserOpts: { sourceType: 'script' }
-          }).code;
-        } catch (babelErr) {
-          // If Babel failed, attempt to map location to original file and show detailed context
-          try {
-            const loc = (babelErr && babelErr.loc) ? babelErr.loc : null;
-            if (loc && typeof loc.line === 'number') {
-              const errLine = loc.line;
-              const errCol = loc.column || 0;
-              // find file in mapping that contains this line
-              let found = null;
-              for (const m of filesMapping) {
-                if (errLine >= m.startLine && errLine <= m.endLine) { found = m; break; }
-              }
-              if (found) {
-                const lineInFile = errLine - found.startLine + 1; // 1-based
-                const lines = found.lines;
-                const from = Math.max(0, lineInFile - 4);
-                const to = Math.min(lines.length, lineInFile + 3);
-                const context = lines.slice(from, to).map((ln, idx) => `${from + idx + 1}: ${ln}`).join('\n');
-                showErrorPanel({
-                  type: 'Babel SyntaxError',
-                  message: babelErr.message,
-                  filename: found.filename,
-                  lineno: lineInFile,
-                  colno: errCol,
-                  raw: context
-                });
-                return; // stop execution
-              }
-            }
-          } catch (mapErr) {
-            console.error('mapping failed', mapErr);
+        try{
+          transpiledCode = Babel.transform(combinedCode, { presets: ['react'], sourceType: 'script', parserOpts: { sourceType: 'script' } }).code;
+        }catch(babelErr){
+          // map babel error to source
+          if(babelErr && babelErr.loc && typeof babelErr.loc.line === 'number'){
+            const errLine = babelErr.loc.line; const errCol = babelErr.loc.column || 0; let found = null; for(const m of filesMapping){ if(errLine >= m.startLine && errLine <= m.endLine){ found = m; break; } }
+            if(found){ const lineInFile = errLine - found.startLine + 1; const lines = found.lines; const from = Math.max(0, lineInFile-4); const to = Math.min(lines.length, lineInFile+3); const context = lines.slice(from,to).map((ln,idx)=> (from+idx+1)+': '+ln).join('\n'); showErrorPanel({ message: babelErr.message, filename: found.filename, lineno: lineInFile, colno: errCol, line: lines[lineInFile-1], contextBefore: lines.slice(Math.max(0,lineInFile-4),lineInFile-1).join('\n'), contextAfter: lines.slice(lineInFile, Math.min(lines.length,lineInFile+3)).join('\n') }); return; }
           }
-          // Generic Babel error fallback
-          showErrorPanel({ type: 'خطأ أثناء تحويل Babel', message: babelErr.message || String(babelErr), raw: String(babelErr && babelErr.stack) });
+          showErrorPanel({ message: babelErr.message, type: 'Babel transform error', combinedAround: combinedCode.slice(0,600) });
           return;
         }
 
-        // If we reached this point, Babel succeeded with sourceType: 'script'
-        // Continue to execute the transpiled code as before
-        loadingHint && loadingHint.remove();
-
-        try {
-          const blob = new Blob([transpiledCode], { type: 'application/javascript' });
-          const blobUrl = URL.createObjectURL(blob);
-          const scriptElement = document.createElement('script');
-          scriptElement.src = blobUrl;
-          scriptElement.onload = function () { URL.revokeObjectURL(blobUrl); };
-          scriptElement.onerror = function (ev) {
-            showErrorPanel({ type: 'خطأ تحميل السكريبت', message: 'فشل تحميل أو تنفيذ السكريبت المدمج', raw: ev });
-          };
-          document.body.appendChild(scriptElement);
-        } catch (e) {
-          // As a fallback, try direct injection and let global handlers catch runtime errors
-          try {
-            const scriptElement = document.createElement('script');
-            scriptElement.text = transpiledCode;
-            document.body.appendChild(scriptElement);
-          } catch (ex) {
-            showErrorPanel({ type: 'خطأ عند إدراج السكريبت', message: ex.message, stack: ex.stack, raw: ex });
-          }
+        // --- required diagnostic ---
+        const tokens = ['require','module.exports','exports.','__dirname','__filename'];
+        const findings = [];
+        for(const t of tokens){
+          let idx = transpiledCode.indexOf(t);
+          while(idx !== -1){ findings.push({ token: t, index: idx }); idx = transpiledCode.indexOf(t, idx+1); }
         }
 
-      } catch (err) {
-        try { loadingHint && loadingHint.remove(); } catch (e) {}
-        showErrorPanel({ type: 'خطأ أثناء بدء التطبيق', message: err.message, stack: err.stack, raw: err });
-      }
+        if(findings.length === 0){
+          showErrorPanel({ message: 'No require found in transpiledCode', foundInTranspiled: false });
+        } else {
+          // report first finding with mapping and context
+          const f = findings[0];
+          const idx = f.index;
+          const lineNumber = transpiledCode.slice(0, idx).split('\n').length;
+          const lastNewline = transpiledCode.slice(0, idx).lastIndexOf('\n');
+          const colNumber = idx - (lastNewline + 1);
+          const fullLineStart = transpiledCode.lastIndexOf('\n', idx-1) + 1;
+          let fullLineEnd = transpiledCode.indexOf('\n', idx);
+          if(fullLineEnd === -1) fullLineEnd = transpiledCode.length;
+          const fullLine = transpiledCode.slice(fullLineStart, fullLineEnd);
+          const around = transpiledCode.slice(Math.max(0, idx-300), Math.min(transpiledCode.length, idx+300));
+
+          // check combinedCode for token
+          const preIndex = combinedCode.indexOf(f.token);
+          const foundInCombined = preIndex !== -1;
+          const combinedAround = foundInCombined ? combinedCode.slice(Math.max(0, preIndex-300), Math.min(combinedCode.length, preIndex+300)) : null;
+
+          // map transpiled line back to original file using filesMapping by line number
+          let mappedFile = null; let mappedLineInFile = null;
+          for(const m of filesMapping){ if(lineNumber >= m.startLine && lineNumber <= m.endLine){ mappedFile = m.filename; mappedLineInFile = lineNumber - m.startLine + 1; break; } }
+
+          // extract 3 lines before/after from mapped file if available
+          let contextBefore = null; let contextAfter = null; let sourceLine = null;
+          if(mappedFile){ const mp = filesMapping.find(x => x.filename === mappedFile); const lines = mp.lines; const li = mappedLineInFile; const from = Math.max(0, li-4); const to = Math.min(lines.length, li+3); contextBefore = lines.slice(Math.max(0, li-4), li-1).map((ln, i)=> (from + i + 1)+': '+ln).join('\n'); contextAfter = lines.slice(li, to).map((ln, i)=> (li + i + 1)+': '+ln).join('\n'); sourceLine = lines[li-1]; }
+
+          showErrorPanel({ message: 'Found CommonJS token in transpiledCode: '+f.token, foundInTranspiled: true, foundInCombined: foundInCombined, filename: mappedFile, lineno: mappedLineInFile, colno: colNumber, line: sourceLine || fullLine, contextBefore: contextBefore, contextAfter: contextAfter, around: around, combinedAround: combinedAround });
+          return; // stop execution so we don't run broken code
+        }
+
+        // continue to execute if no findings
+        loadingHint && loadingHint.remove();
+        const blob = new Blob([transpiledCode], { type: 'application/javascript' });
+        const blobUrl = URL.createObjectURL(blob);
+        const scriptEl = document.createElement('script'); scriptEl.src = blobUrl; scriptEl.onload = () => URL.revokeObjectURL(blobUrl); scriptEl.onerror = (ev) => showErrorPanel({ message: 'Error loading blob script', raw: ev }); document.body.appendChild(scriptEl);
+      }catch(err){ loadingHint && loadingHint.remove(); showErrorPanel({ message: err && err.message || String(err) }); }
     }
 
-    // بدء التشغيل عند اكتمال تحميل الصفحة
     window.addEventListener('DOMContentLoaded', launchApp);
   </script>
 </body>
