@@ -6,7 +6,7 @@ const { useState, useEffect } = React;
 // ⚠️ إعداد الاتصال — الصقّ هنا بيانات مشروعك من Supabase (Project Settings > API)
 // =============================================================================
 const SUPABASE_URL = "https://fkyljqnuraedyozasfwm.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_V6XY4M4LoNEMhxWO3DCV7w_SDUI8_az";
+const SUPABASE_ANON_KEY = "sb_publishable_Xs-Y4dG7OSN17fyffPzqwA_8o8SwH0F";
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
