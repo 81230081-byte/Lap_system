@@ -23,10 +23,30 @@
       .printable-area, #report-area { position: absolute; top: 0; right: 0; left: 0; width: 100%; border: none !important; }
       .hidden.print\:block { display: block !important; }
     }
-    #debug-box button {
-      background: #B3402A; color: #fff; border: none; border-radius: 6px;
-      padding: 8px 18px; font-weight: bold; cursor: pointer; font-family: inherit;
+
+    /* صندوق الأخطاء: يغطي الشاشة حتى لو فشل التطبيق بالكامل */
+    #debug-box {
+      display: none;
+      position: fixed;
+      inset: 16px;
+      z-index: 99999;
+      background: rgba(255, 255, 255, 0.98);
+      border: 2px solid #f87171; /* red-400 */
+      color: #991b1b; /* red-700 */
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+      overflow: auto;
+      direction: rtl;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Helvetica Neue", monospace;
+      font-size: 13px;
+      line-height: 1.4;
     }
+
+    #debug-box .actions { margin-top: 12px; display:flex; gap:8px; justify-content: flex-start; }
+    #debug-box button { background: #B3402A; color: #fff; border: none; border-radius: 6px; padding: 8px 14px; font-weight: bold; cursor: pointer; font-family: inherit; }
+    #debug-box pre { background: #111827; color: #e5e7eb; padding: 10px; border-radius: 6px; overflow:auto; white-space: pre-wrap; word-break: break-word; direction: ltr; }
+
     #loading-hint {
       position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
       font-family: sans-serif; color: #5B665F; font-size: 14px; direction: rtl;
@@ -36,7 +56,7 @@
 <body class="bg-gray-100 text-gray-900 min-h-screen">
 
   <!-- شاشة تنبيه الأخطاء -->
-  <div id="debug-box" style="display:none;" class="m-4 p-4 bg-red-100 border-2 border-red-500 text-red-800 rounded-lg text-left font-mono text-sm dir-ltr"></div>
+  <div id="debug-box" role="alert" aria-live="assertive"></div>
   <div id="loading-hint">...جارِ تحميل النظام (قد يستغرق حتى 30 ثانية على شبكة بطيئة)</div>
 
   <!-- مكان عرض التطبيق -->
@@ -44,6 +64,173 @@
 
   <!-- سكريبت الدمج والتشغيل الموحد -->
   <script>
+    // Small utility to safely escape text when needed (we prefer textContent but keep for completeness)
+    function escapeHtml(str) {
+      if (str == null) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    // Build a robust error panel and show it. Avoid innerHTML for untrusted content.
+    function showErrorPanel(info) {
+      try {
+        const box = document.getElementById('debug-box');
+        if (!box) return console.error('debug-box not found', info);
+        box.innerHTML = '';
+        box.style.display = 'block';
+
+        const title = document.createElement('div');
+        title.style.fontSize = '16px';
+        title.style.marginBottom = '8px';
+        title.style.fontWeight = '700';
+        title.textContent = 'حدث خطأ أثناء تشغيل التطبيق';
+        box.appendChild(title);
+
+        const list = document.createElement('div');
+
+        function addRow(label, value, isPre) {
+          const row = document.createElement('div');
+          row.style.marginBottom = '6px';
+
+          const lab = document.createElement('div');
+          lab.style.fontWeight = '600';
+          lab.style.display = 'inline-block';
+          lab.style.minWidth = '90px';
+          lab.textContent = label + ':';
+
+          row.appendChild(lab);
+
+          if (isPre) {
+            const pre = document.createElement('pre');
+            pre.textContent = value == null ? '' : value;
+            row.appendChild(pre);
+          } else {
+            const span = document.createElement('span');
+            span.style.marginRight = '6px';
+            span.textContent = value == null ? '' : value;
+            row.appendChild(span);
+          }
+          list.appendChild(row);
+        }
+
+        // Standard fields
+        addRow('نوع', info.type || 'خطأ جافاسكربت');
+        addRow('الرسالة', info.message || (info.error && info.error.message) || 'بدون رسالة');
+        if (info.filename) addRow('الملف', info.filename);
+        if (info.lineno != null || info.colno != null) addRow('السطر:العمود', (info.lineno || '?') + ':' + (info.colno || '?'));
+        if (info.stack) addRow('Stack Trace', info.stack, true);
+
+        // Resource loading info
+        if (info.resource) {
+          addRow('المورد', info.resource);
+          addRow('عنصر', info.targetTag || '');
+        }
+
+        // Raw object for debugging
+        if (info.raw) addRow('raw', JSON.stringify(info.raw, Object.getOwnPropertyNames(info.raw || {}), 2), true);
+
+        box.appendChild(list);
+
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+
+        const reloadBtn = document.createElement('button');
+        reloadBtn.textContent = 'إعادة تحميل الصفحة';
+        reloadBtn.onclick = function () { location.reload(); };
+        actions.appendChild(reloadBtn);
+
+        const copyBtn = document.createElement('button');
+        copyBtn.textContent = 'نسخ تفاصيل الخطأ';
+        copyBtn.onclick = function () {
+          const toCopy = JSON.stringify(info, Object.getOwnPropertyNames(info || {}), 2);
+          navigator.clipboard && navigator.clipboard.writeText(toCopy).then(function(){
+            copyBtn.textContent = 'تم النسخ';
+            setTimeout(()=> copyBtn.textContent = 'نسخ تفاصيل الخطأ', 2000);
+          }).catch(()=>{
+            // fallback
+            alert('تعذر نسخ التفاصيل — انسخها يدوياً');
+          });
+        };
+        actions.appendChild(copyBtn);
+
+        box.appendChild(actions);
+
+        // Also log to console in structured way
+        try { console.error('Application error captured:', info); } catch (e) {}
+      } catch (e) {
+        // If the error overlay building itself fails, fallback to a minimal alert so user isn't left with white screen
+        try { alert('خطأ خطير: ' + (e && e.message)); } catch (e2) {}
+      }
+    }
+
+    // Global handlers: catch runtime errors, resource load failures and unhandled promise rejections
+    window.addEventListener('error', function (event) {
+      try {
+        // Resource loading error: event.target is the failed element (script/link/img)
+        if (event.target && (event.target.src || event.target.href)) {
+          const resource = event.target.src || event.target.href;
+          showErrorPanel({
+            type: 'خطأ تحميل مورد',
+            message: 'فشل تحميل مورد (network/resource error)',
+            resource: resource,
+            targetTag: event.target.tagName,
+            raw: {
+              tagName: event.target.tagName,
+              outerHTML: (event.target && event.target.outerHTML) ? event.target.outerHTML : undefined
+            }
+          });
+          // prevent default browser logging duplication
+          event.preventDefault && event.preventDefault();
+          return;
+        }
+
+        // JS runtime error
+        const info = {
+          type: 'خطأ وقت التشغيل',
+          message: event.message,
+          filename: event.filename,
+          lineno: event.lineno,
+          colno: event.colno,
+          stack: (event.error && event.error.stack) || null,
+          raw: event.error || null
+        };
+        showErrorPanel(info);
+        event.preventDefault && event.preventDefault();
+      } catch (e) {
+        console.error('error handler failed', e);
+      }
+    }, true);
+
+    window.addEventListener('unhandledrejection', function (event) {
+      try {
+        const reason = event.reason;
+        let message = '';
+        let stack = null;
+        if (!reason) {
+          message = 'Unhandled rejection with no reason';
+        } else if (reason instanceof Error) {
+          message = reason.message;
+          stack = reason.stack;
+        } else {
+          try { message = JSON.stringify(reason); } catch (e) { message = String(reason); }
+        }
+
+        showErrorPanel({
+          type: 'Unhandled Promise Rejection',
+          message: message,
+          stack: stack,
+          raw: reason
+        });
+        event.preventDefault && event.preventDefault();
+      } catch (e) {
+        console.error('unhandledrejection handler failed', e);
+      }
+    });
+
     // ينتظر توفّر متغيّر عام (مكتبة CDN) مع مهلة، بدل الفشل الفوري إذا تأخرت الشبكة
     function waitForGlobal(name, timeoutMs, intervalMs) {
       timeoutMs = timeoutMs || 30000;
@@ -76,7 +263,7 @@
           if (i < retries - 1) await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
         }
       }
-      throw new Error(`تعذر تحميل الملف: ${url} (${lastErr.message})`);
+      throw new Error(`تعذر تحميل الملف: ${url} (${lastErr && lastErr.message})`);
     }
 
     async function launchApp() {
@@ -122,22 +309,50 @@
         }
 
         // الخطوة 3: تحويل الكود المدمج عبر Babel
-        const transpiledCode = Babel.transform(combinedCode, {
-          presets: ['react']
-        }).code;
+        let transpiledCode;
+        try {
+          transpiledCode = Babel.transform(combinedCode, {
+            presets: ['react']
+          }).code;
+        } catch (babelErr) {
+          // Capture Babel transpilation errors with details
+          showErrorPanel({
+            type: 'خطأ أثناء تحويل Babel',
+            message: babelErr.message || 'خطأ أثناء تحويل الكود',
+            stack: babelErr.stack || null,
+            raw: babelErr
+          });
+          return;
+        }
 
         // الخطوة 4: تنفيذ الكود داخل المتصفح
-        loadingHint.remove();
-        const scriptElement = document.createElement('script');
-        scriptElement.text = transpiledCode;
-        document.body.appendChild(scriptElement);
+        loadingHint && loadingHint.remove();
+
+        // Create script as a blob so if runtime errors occur they will be caught by global handlers
+        try {
+          const blob = new Blob([transpiledCode], { type: 'application/javascript' });
+          const blobUrl = URL.createObjectURL(blob);
+          const scriptElement = document.createElement('script');
+          scriptElement.src = blobUrl;
+          scriptElement.onload = function () { URL.revokeObjectURL(blobUrl); };
+          scriptElement.onerror = function (ev) {
+            showErrorPanel({ type: 'خطأ تحميل السكريبت', message: 'فشل تحميل أو تنفيذ السكريبت المدمج', raw: ev });
+          };
+          document.body.appendChild(scriptElement);
+        } catch (e) {
+          // As a fallback, try direct injection and let global handlers catch runtime errors
+          try {
+            const scriptElement = document.createElement('script');
+            scriptElement.text = transpiledCode;
+            document.body.appendChild(scriptElement);
+          } catch (ex) {
+            showErrorPanel({ type: 'خطأ عند إدراج السكريبت', message: ex.message, stack: ex.stack, raw: ex });
+          }
+        }
 
       } catch (err) {
-        loadingHint.remove();
-        debugBox.style.display = 'block';
-        debugBox.innerHTML =
-          `<b style="color:red">فشل تشغيل النظام:</b><br><br>${err.message}` +
-          `<br><br><button onclick="location.reload()">إعادة المحاولة</button>`;
+        try { loadingHint && loadingHint.remove(); } catch (e) {}
+        showErrorPanel({ type: 'خطأ أثناء بدء التطبيق', message: err.message, stack: err.stack, raw: err });
       }
     }
 
