@@ -71,7 +71,7 @@
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
+        .replace(/\"/g, '&quot;')
         .replace(/'/g, '&#39;');
     }
 
@@ -80,7 +80,8 @@
       try {
         const box = document.getElementById('debug-box');
         if (!box) return console.error('debug-box not found', info);
-        box.innerHTML = '';
+        // replaceChildren is safer than innerHTML = ''
+        box.replaceChildren();
         box.style.display = 'block';
 
         const title = document.createElement('div');
@@ -131,7 +132,7 @@
         }
 
         // Raw object for debugging
-        if (info.raw) addRow('raw', JSON.stringify(info.raw, Object.getOwnPropertyNames(info.raw || {}), 2), true);
+        if (info.raw) addRow('raw', typeof info.raw === 'string' ? info.raw : JSON.stringify(info.raw, Object.getOwnPropertyNames(info.raw || {}), 2), true);
 
         box.appendChild(list);
 
@@ -240,7 +241,7 @@
         const check = () => {
           if (typeof window[name] !== 'undefined') return resolve();
           if (Date.now() - start > timeoutMs) {
-            return reject(new Error(`تعذر تحميل مكتبة "${name}" — الشبكة بطيئة أو غير مستقرة. تحقق من الاتصال (يفضّل واي فاي) وأعد المحاولة.`));
+            return reject(new Error(`تعذر تحميل مكتبة \"${name}\" — الشبكة بطيئة أو غير مستقرة. تحقق من الاتصال (يفضّل واي فاي) وأعد المحاولة.`));
           }
           setTimeout(check, intervalMs);
         };
@@ -264,6 +265,40 @@
         }
       }
       throw new Error(`تعذر تحميل الملف: ${url} (${lastErr && lastErr.message})`);
+    }
+
+    function splitCombinedByFile(combinedCode) {
+      // split using the marker /* --- File: filename --- */\n
+      const parts = combinedCode.split(/\/\*\s--- File:\s*(.+?)\s--- \*\/[\r\n]?/);
+      // resulting array: [prefix, filename1, content1, filename2, content2, ...]
+      const files = [];
+      for (let i = 1; i < parts.length; i += 2) {
+        const filename = parts[i];
+        const content = parts[i + 1] || '';
+        files.push({ filename, content });
+      }
+      return files;
+    }
+
+    function findForbiddenInContent(content) {
+      const results = [];
+      const checks = [
+        { name: 'static import', re: /(^|[^\w$])import\b/m },
+        { name: 'static export', re: /(^|[^\w$])export\b/m },
+        { name: 'dynamic import with object', re: /import\s*\(\s*\{/m },
+        { name: '<script tag', re: /<script\b/i },
+        { name: '</script tag', re: /<\/script>/i },
+        { name: '<html tag', re: /<html\b/i },
+        { name: '<!DOCTYPE', re: /<!DOCTYPE/i },
+        { name: 'leading object', re: /^\s*\{/m }
+      ];
+      for (const c of checks) {
+        const m = c.re.exec(content);
+        if (m) {
+          results.push({ type: c.name, index: m.index, match: m[0] });
+        }
+      }
+      return results;
     }
 
     async function launchApp() {
@@ -308,6 +343,29 @@
           combinedCode += `\n/* --- File: ${file} --- */\n` + text;
         }
 
+        // Pre-Babel: inspect each file's content for forbidden tokens
+        const splitFiles = splitCombinedByFile(combinedCode);
+        for (const f of splitFiles) {
+          const issues = findForbiddenInContent(f.content);
+          if (issues.length) {
+            // report first issue with context
+            const issue = issues[0];
+            const lines = f.content.split(/\r?\n/);
+            const approxLine = f.content.slice(0, issue.index).split(/\r?\n/).length;
+            const from = Math.max(0, approxLine - 4);
+            const to = Math.min(lines.length, approxLine + 4);
+            const context = lines.slice(from, to).join('\n');
+            showErrorPanel({
+              type: 'Diagnostic: forbidden syntax before Babel',
+              message: `تم العثور على ${issue.type} في الملف قبل التحويل بواسطة Babel — لن يتم تنفيذ الشفرة.`,
+              filename: f.filename,
+              lineno: approxLine,
+              raw: context
+            });
+            return; // stop execution
+          }
+        }
+
         // الخطوة 3: تحويل الكود المدمج عبر Babel
         let transpiledCode;
         try {
@@ -325,10 +383,35 @@
           return;
         }
 
-        // الخطوة 4: تنفيذ الكود داخل المتصفح
+        // Post-Babel: inspect transpiled code for import/export tokens
+        // If present, try to map back to source file using combinedCode markers
+        const postChecks = [/\bimport\s*\(/, /\bimport\s+/, /\bexport\b/];
+        for (const rx of postChecks) {
+          const m = rx.exec(transpiledCode);
+          if (m) {
+            // try to locate which original file contains the token
+            let foundFile = null;
+            for (const f of splitFiles) {
+              if (f.content && rx.test(f.content)) { foundFile = f; break; }
+            }
+            // compute line in transpiledCode for context
+            const idx = m.index;
+            const tlines = transpiledCode.slice(Math.max(0, idx - 300), Math.min(transpiledCode.length, idx + 300)).split(/\r?\n/);
+
+            showErrorPanel({
+              type: 'Diagnostic: forbidden syntax after Babel',
+              message: `الكود الناتج بعد Babel يحتوي على "${m[0].trim()}" — لا يمكن تنفيذ هذا كـ classic script.`,
+              filename: foundFile ? foundFile.filename : 'unknown (in transpiled output)',
+              lineno: foundFile ? (f.content.slice(0, f.content.indexOf(m[0]) )).split(/\r?\n/).length : null,
+              raw: tlines.join('\n')
+            });
+            return;
+          }
+        }
+
+        // Step 4: finally execute the transpiled code as a blob script
         loadingHint && loadingHint.remove();
 
-        // Create script as a blob so if runtime errors occur they will be caught by global handlers
         try {
           const blob = new Blob([transpiledCode], { type: 'application/javascript' });
           const blobUrl = URL.createObjectURL(blob);
