@@ -69,7 +69,7 @@
 
     function waitForGlobal(name, timeoutMs=30000, intervalMs=200){ return new Promise((resolve,reject)=>{ const start=Date.now(); const check=()=>{ if(typeof window[name] !== 'undefined') return resolve(); if(Date.now()-start>timeoutMs) return reject(new Error('تعذر تحميل مكتبة "'+name+'"')); setTimeout(check, intervalMs); }; check(); }); }
 
-    async function fetchWithRetry(url, retries=4, delayMs=900){ let lastErr; for(let i=0;i<retries;i++){ try{ const res = await fetch(url,{cache:'no-store'}); if(!res.ok) throw new Error('ر��ز الخطأ: '+res.status); return await res.text(); }catch(err){ lastErr=err; if(i<retries-1) await new Promise(r=>setTimeout(r, delayMs*(i+1))); } } throw new Error('تعذر تحميل الملف: '+url+' ('+(lastErr&&lastErr.message)+')'); }
+    async function fetchWithRetry(url, retries=4, delayMs=900){ let lastErr; for(let i=0;i<retries;i++){ try{ const res = await fetch(url,{cache:'no-store'}); if(!res.ok) throw new Error('رمز الخطأ: '+res.status); return await res.text(); }catch(err){ lastErr=err; if(i<retries-1) await new Promise(r=>setTimeout(r, delayMs*(i+1))); } } throw new Error('تعذر تحميل الملف: '+url+' ('+(lastErr&&lastErr.message)+')'); }
 
     function splitCombinedByFile(combinedCode){ const parts = combinedCode.split(/\/\*\s--- File:\s*(.+?)\s--- \*\/[\r\n]?/); const files=[]; for(let i=1;i<parts.length;i+=2){ files.push({ filename: parts[i], content: parts[i+1]||'' }); } return files; }
     function computeFileMapping(combinedCode, filesArray){ const mapping=[]; let lineCursor=1; for(const f of filesArray){ const markerSnippet='\n/* --- File: '+f.filename+' --- */\n'; const markerLines = markerSnippet.split(/\r?\n/).length; const contentLines = f.content.split(/\r?\n/).length; const startLine = lineCursor + markerLines - 1; const endLine = startLine + contentLines - 1; mapping.push({ filename: f.filename, startLine, endLine, lines: f.content.split(/\r?\n/) }); lineCursor = endLine + 1; } return mapping; }
@@ -86,7 +86,31 @@
 
         let transpiledCode;
         try{
-          transpiledCode = Babel.transform(combinedCode, { presets: ['react'], sourceType: 'script', parserOpts: { sourceType: 'script' } }).code;
+          // quick test: does Babel standalone respect runtime: 'classic' in this environment?
+          let testResult = null;
+          try{
+            testResult = Babel.transform('const X = () => <div>Hello</div>;', { presets: [['react',{ runtime: 'classic' }]], sourceType: 'script', parserOpts: { sourceType: 'script' } }).code;
+            console.log('Babel JSX test (classic preset) result:', testResult.slice(0,200));
+          }catch(te){ console.warn('Babel test transform failed', te); testResult = null; }
+
+          const testContainsJsxRuntime = testResult && (testResult.indexOf('react/jsx-runtime') !== -1 || testResult.indexOf('require("react/jsx-runtime")') !== -1 || testResult.indexOf("require('react/jsx-runtime')") !== -1);
+
+          if(testContainsJsxRuntime){
+            // fallback: use explicit plugin that emits React.createElement calls
+            console.warn('Babel standalone produced jsx-runtime require even with runtime:classic; switching to transform-react-jsx plugin.');
+            transpiledCode = Babel.transform(combinedCode, {
+              plugins: [ ['transform-react-jsx', { pragma: 'React.createElement', pragmaFrag: 'React.Fragment' }] ],
+              sourceType: 'script',
+              parserOpts: { sourceType: 'script' }
+            }).code;
+          } else {
+            transpiledCode = Babel.transform(combinedCode, {
+              presets: [ ['react', { runtime: 'classic' }] ],
+              sourceType: 'script',
+              parserOpts: { sourceType: 'script' }
+            }).code;
+          }
+
         }catch(babelErr){
           // map babel error to source
           if(babelErr && babelErr.loc && typeof babelErr.loc.line === 'number'){
@@ -106,7 +130,11 @@
         }
 
         if(findings.length === 0){
-          showErrorPanel({ message: 'No require found in transpiledCode', foundInTranspiled: false });
+          // no commonjs tokens - proceed
+          loadingHint && loadingHint.remove();
+          const blob = new Blob([transpiledCode], { type: 'application/javascript' });
+          const blobUrl = URL.createObjectURL(blob);
+          const scriptEl = document.createElement('script'); scriptEl.src = blobUrl; scriptEl.onload = () => URL.revokeObjectURL(blobUrl); scriptEl.onerror = (ev) => showErrorPanel({ message: 'Error loading blob script', raw: ev }); document.body.appendChild(scriptEl);
         } else {
           // report first finding with mapping and context
           const f = findings[0];
@@ -136,12 +164,6 @@
           showErrorPanel({ message: 'Found CommonJS token in transpiledCode: '+f.token, foundInTranspiled: true, foundInCombined: foundInCombined, filename: mappedFile, lineno: mappedLineInFile, colno: colNumber, line: sourceLine || fullLine, contextBefore: contextBefore, contextAfter: contextAfter, around: around, combinedAround: combinedAround });
           return; // stop execution so we don't run broken code
         }
-
-        // continue to execute if no findings
-        loadingHint && loadingHint.remove();
-        const blob = new Blob([transpiledCode], { type: 'application/javascript' });
-        const blobUrl = URL.createObjectURL(blob);
-        const scriptEl = document.createElement('script'); scriptEl.src = blobUrl; scriptEl.onload = () => URL.revokeObjectURL(blobUrl); scriptEl.onerror = (ev) => showErrorPanel({ message: 'Error loading blob script', raw: ev }); document.body.appendChild(scriptEl);
       }catch(err){ loadingHint && loadingHint.remove(); showErrorPanel({ message: err && err.message || String(err) }); }
     }
 
