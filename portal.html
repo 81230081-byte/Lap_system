@@ -75,9 +75,14 @@
 </div>
 
 <script>
-const SUPABASE_URL = "https://dkdgexaupclewflwyyrl.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_V6XY4M4LoNEMhxWO3DCV7w_SDUI8_az";
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Use existing global sb (from main app / 01-config.js) if present. Otherwise create a staging client.
+var sb = window.sb;
+if (!sb) {
+  var SUPABASE_URL = "https://fkyljqnuraedyozasfwm.supabase.co";
+  var SUPABASE_ANON_KEY = "sb_publishable_Xs-Y4dG7OSN17fyffPzqwA_8o8SwH0F";
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  window.sb = sb; // expose globally for consistency
+}
 
 const form = document.getElementById('lookup-form');
 const submitBtn = document.getElementById('submit-btn');
@@ -130,7 +135,7 @@ function renderReport(data) {
   }).join('');
 
   reportEl.innerHTML = `
-    ${data.has_critical ? `<div class="critical-banner">⚠ يحتوي هذا التقرير على قيمة تستدعي انتباهاً طبياً — يُرجى مراجعة الطبيب المعالج في أقرب وقت.</div>` : ''}
+    ${data.has_critical ? `<div class="critical-banner">⚠ يحتوي هذا التقرير على قيمة تستدعي انتباهاً طبياً — يُرجى مراجعة الطبيب المعالج</div>` : ''}
     <div class="head">
       <div>
         <div class="patient-name">${esc(data.patient_name)}</div>
@@ -168,7 +173,7 @@ form.addEventListener('submit', async (e) => {
     if (error) {
       showMessage('تعذّر الاتصال بالخادم، حاول مرة أخرى بعد قليل.', 'error');
     } else if (!data || !data.found) {
-      showMessage('لم يتم العثور على نتيجة بهذه البيانات. تأكد من رقم العينة ورقم الهاتف المسجَّل، أو أن نتيجتك قد لا تكون جاهزة بعد.', 'info');
+      showMessage('لم يتم العثور على نتيجة بهذه البيانات. تأكد من رقم العينة ورقم الهاتف المسجَّل، أو أن نتيجتك قد لا تكون جاهزة بعد.', 'error');
     } else {
       renderReport(data);
     }
