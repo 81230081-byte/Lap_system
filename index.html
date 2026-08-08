@@ -280,25 +280,23 @@
       return files;
     }
 
-    function findForbiddenInContent(content) {
-      const results = [];
-      const checks = [
-        { name: 'static import', re: /(^|[^\w$])import\b/m },
-        { name: 'static export', re: /(^|[^\w$])export\b/m },
-        { name: 'dynamic import with object', re: /import\s*\(\s*\{/m },
-        { name: '<script tag', re: /<script\b/i },
-        { name: '</script tag', re: /<\/script>/i },
-        { name: '<html tag', re: /<html\b/i },
-        { name: '<!DOCTYPE', re: /<!DOCTYPE/i },
-        { name: 'leading object', re: /^\s*\{/m }
-      ];
-      for (const c of checks) {
-        const m = c.re.exec(content);
-        if (m) {
-          results.push({ type: c.name, index: m.index, match: m[0] });
-        }
+    function computeFileMapping(combinedCode, filesArray) {
+      // returns array of { filename, startLine, endLine, linesArray }
+      const mapping = [];
+      // we reconstruct each snippet exactly as it was appended in combinedCode
+      // combinedCode was built as: combinedCode += `\n/* --- File: ${file} --- */\n` + text;
+      let lineCursor = 1; // lines are 1-based
+      for (const f of filesArray) {
+        const markerSnippet = '\n/* --- File: ' + f.filename + ' --- */\n';
+        const markerLines = markerSnippet.split(/\r?\n/).length; // typically 3: '' line, marker line, ''
+        const contentLines = f.content.split(/\r?\n/).length;
+        const startLine = lineCursor + markerLines - 1; // first line of content
+        const endLine = startLine + contentLines - 1;
+        mapping.push({ filename: f.filename, startLine, endLine, lines: f.content.split(/\r?\n/) });
+        // advance cursor
+        lineCursor = endLine + 1;
       }
-      return results;
+      return mapping;
     }
 
     async function launchApp() {
@@ -326,7 +324,7 @@
         '17-app-shell.jsx',
         '19-appointments.jsx',
         '21-quality-control.jsx',
-        '20-main.jsx' // يجب أن يكون الملف الرئيسي في النهاية
+        '20-main.jsx' // يجب أن يكون الملف ا��رئيسي في النهاية
       ];
 
       try {
@@ -338,78 +336,63 @@
 
         // الخطوة 2: جلب وقراءة كافة ملفات النظام (مع إعادة محاولة لكل ملف عند فشل الشبكة)
         let combinedCode = '';
+        const fetchedFiles = [];
         for (const file of files) {
           const text = await fetchWithRetry('./' + file);
+          fetchedFiles.push({ filename: file, content: text });
           combinedCode += `\n/* --- File: ${file} --- */\n` + text;
         }
 
-        // Pre-Babel: inspect each file's content for forbidden tokens
-        const splitFiles = splitCombinedByFile(combinedCode);
-        for (const f of splitFiles) {
-          const issues = findForbiddenInContent(f.content);
-          if (issues.length) {
-            // report first issue with context
-            const issue = issues[0];
-            const lines = f.content.split(/\r?\n/);
-            const approxLine = f.content.slice(0, issue.index).split(/\r?\n/).length;
-            const from = Math.max(0, approxLine - 4);
-            const to = Math.min(lines.length, approxLine + 4);
-            const context = lines.slice(from, to).join('\n');
-            showErrorPanel({
-              type: 'Diagnostic: forbidden syntax before Babel',
-              message: `تم العثور على ${issue.type} في الملف قبل التحويل بواسطة Babel — لن يتم تنفيذ الشفرة.`,
-              filename: f.filename,
-              lineno: approxLine,
-              raw: context
-            });
-            return; // stop execution
-          }
-        }
+        // prepare mapping from combinedCode lines back to filenames
+        const filesMapping = computeFileMapping(combinedCode, fetchedFiles);
 
-        // الخطوة 3: تحويل الكود المدمج عبر Babel
+        // الخطوة 3: تحويل الكود المدمج عبر Babel بصيغة script (لا كموديل)
         let transpiledCode;
         try {
           transpiledCode = Babel.transform(combinedCode, {
-            presets: ['react']
+            presets: ['react'],
+            sourceType: 'script',
+            parserOpts: { sourceType: 'script' }
           }).code;
         } catch (babelErr) {
-          // Capture Babel transpilation errors with details
-          showErrorPanel({
-            type: 'خطأ أثناء تحويل Babel',
-            message: babelErr.message || 'خطأ أثناء تحويل الكود',
-            stack: babelErr.stack || null,
-            raw: babelErr
-          });
+          // If Babel failed, attempt to map location to original file and show detailed context
+          try {
+            const loc = (babelErr && babelErr.loc) ? babelErr.loc : null;
+            if (loc && typeof loc.line === 'number') {
+              const errLine = loc.line;
+              const errCol = loc.column || 0;
+              // find file in mapping that contains this line
+              let found = null;
+              for (const m of filesMapping) {
+                if (errLine >= m.startLine && errLine <= m.endLine) { found = m; break; }
+              }
+              if (found) {
+                const lineInFile = errLine - found.startLine + 1; // 1-based
+                const lines = found.lines;
+                const from = Math.max(0, lineInFile - 4);
+                const to = Math.min(lines.length, lineInFile + 3);
+                const context = lines.slice(from, to).map((ln, idx) => `${from + idx + 1}: ${ln}`).join('\n');
+                showErrorPanel({
+                  type: 'Babel SyntaxError',
+                  message: babelErr.message,
+                  filename: found.filename,
+                  lineno: lineInFile,
+                  colno: errCol,
+                  raw: context
+                });
+                return; // stop execution
+              }
+            }
+          } catch (mapErr) {
+            console.error('mapping failed', mapErr);
+          }
+          // Generic Babel error fallback
+          showErrorPanel({ type: 'خطأ أثناء تحويل Babel', message: babelErr.message || String(babelErr), raw: String(babelErr && babelErr.stack) });
           return;
         }
 
-        // Post-Babel: inspect transpiled code for import/export tokens
-        // If present, try to map back to source file using combinedCode markers
-        const postChecks = [/\bimport\s*\(/, /\bimport\s+/, /\bexport\b/];
-        for (const rx of postChecks) {
-          const m = rx.exec(transpiledCode);
-          if (m) {
-            // try to locate which original file contains the token
-            let foundFile = null;
-            for (const f of splitFiles) {
-              if (f.content && rx.test(f.content)) { foundFile = f; break; }
-            }
-            // compute line in transpiledCode for context
-            const idx = m.index;
-            const tlines = transpiledCode.slice(Math.max(0, idx - 300), Math.min(transpiledCode.length, idx + 300)).split(/\r?\n/);
-
-            showErrorPanel({
-              type: 'Diagnostic: forbidden syntax after Babel',
-              message: `الكود الناتج بعد Babel يحتوي على "${m[0].trim()}" — لا يمكن تنفيذ هذا كـ classic script.`,
-              filename: foundFile ? foundFile.filename : 'unknown (in transpiled output)',
-              lineno: foundFile ? (f.content.slice(0, f.content.indexOf(m[0]) )).split(/\r?\n/).length : null,
-              raw: tlines.join('\n')
-            });
-            return;
-          }
-        }
-
-        // Step 4: finally execute the transpiled code as a blob script
+        // If we reached this point, Babel succeeded with sourceType: 'script'
+        // Continue to execute the transpiled code as before
         loadingHint && loadingHint.remove();
 
         try {
