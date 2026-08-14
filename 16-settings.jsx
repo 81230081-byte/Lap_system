@@ -274,9 +274,37 @@ function UserPermissionsRow({ user, isSelf, userPerms, actions, askConfirm }) {
   const isManagerRole = user.role === 'مدير';
 
   const toggle = (key, label) => {
-    if (userPerms.has(key)) actions.revokePermission(user.id, user.display_name, key, label);
-    else actions.grantPermission(user.id, user.display_name, key, label);
-  };
+  const hasPermission = userPerms.has(key);
+
+  if (hasPermission) {
+    askConfirm({
+      title: 'إلغاء صلاحية',
+      message: `هل أنت متأكد من إلغاء صلاحية "${label}" من المستخدم "${user.display_name}"؟`,
+      danger: true,
+      onConfirm: () =>
+        actions.revokePermission(
+          user.id,
+          user.display_name,
+          key,
+          label
+        ),
+    });
+    return;
+  }
+
+  askConfirm({
+    title: 'منح صلاحية',
+    message: `هل تريد منح المستخدم "${user.display_name}" صلاحية "${label}"؟`,
+    danger: false,
+    onConfirm: () =>
+      actions.grantPermission(
+        user.id,
+        user.display_name,
+        key,
+        label
+      ),
+  });
+};
 
   return (
     <>
