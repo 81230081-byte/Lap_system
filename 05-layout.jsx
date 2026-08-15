@@ -18,13 +18,20 @@ const NAV = [
   { key: 'settings', label: 'الإعدادات' },
 ];
 
-const MANAGER_ONLY_NAV_KEYS = ['treasury', 'financial-reports'];
-const NAV_PERMISSION_KEY = { treasury: 'view_treasury', 'financial-reports': 'view_financial_reports' };
+const MANAGER_ONLY_NAV_KEYS = ['treasury', 'financial-reports', 'audit'];
+// كل مفتاح يقابل قائمة صلاحيات — يكفي امتلاك واحدة منها لإظهار العنصر.
+// 'audit' يقبل الصلاحية القديمة (view_financial_reports) أو الجديدة (view_audit_log) معاً
+// حتى لا ينكسر وصول أي مستخدم كان يعتمد على الصلاحية القديمة.
+const NAV_PERMISSION_KEYS = {
+  treasury: ['view_treasury'],
+  'financial-reports': ['view_financial_reports'],
+  audit: ['view_financial_reports', 'view_audit_log'],
+};
 
 function Sidebar({ view, setView, displayName, role, isManager, can, labName, logoSrc, onLogout, onExport, saveError }) {
   const items = NAV.filter((item) => {
     if (!MANAGER_ONLY_NAV_KEYS.includes(item.key)) return true;
-    return isManager || (can && can(NAV_PERMISSION_KEY[item.key]));
+    return isManager || (can && NAV_PERMISSION_KEYS[item.key].some((perm) => can(perm)));
   });
   return (
     <div className="w-56 shrink-0 h-full flex flex-col" style={{ background: C.surface, borderLeft: `1px solid ${C.line}` }}>
