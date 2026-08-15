@@ -203,32 +203,23 @@ function LabInfoTab({ labSettings, actions, isManager, can }) {
 // ---------------------------------------------------------------------------
 // Users & Permissions tab
 // ---------------------------------------------------------------------------
-const PERMISSION_GROUPS = [
-  { group: 'العمليات اليومية', items: [
-    { key: 'verify_results', label: 'اعتماد / إرجاع نتائج الفحوصات' },
-    { key: 'delete_patients', label: 'حذف مرضى' },
-    { key: 'delete_appointments', label: 'حذف مواعيد' },
-    { key: 'delete_qc', label: 'حذف فحوصات جودة' },
-  ]},
-  { group: 'المخزون والفحوصات والموردين', items: [
-    { key: 'manage_inventory', label: 'إدارة المخزون (إضافة/تعديل/حذف)' },
-    { key: 'manage_catalog', label: 'إدارة كتالوج الفحوصات' },
-    { key: 'manage_suppliers', label: 'إدارة الموردين' },
-    { key: 'manage_referring_doctors', label: 'إدارة الأطباء المحوّلين' },
-  ]},
-  { group: 'الأموال والتقارير', items: [
-    { key: 'view_treasury', label: 'عرض الصناديق والبنوك والرواتب' },
-    { key: 'manage_accounts', label: 'إدارة الصناديق والحسابات البنكية' },
-    { key: 'view_financial_reports', label: 'عرض التقارير المالية' },
-    { key: 'manage_coa', label: 'إدارة الشجرة المحاسبية' },
-  ]},
-  { group: 'الإدارة', items: [
-    { key: 'manage_settings', label: 'تعديل بيانات المختبر' },
-    { key: 'manage_users', label: 'إدارة المستخدمين والصلاحيات' },
-  ]},
-];
-const ALL_PERMISSION_KEYS = PERMISSION_GROUPS.flatMap((g) => g.items.map((i) => i.key));
-const PERMISSION_LABELS = Object.fromEntries(PERMISSION_GROUPS.flatMap((g) => g.items.map((i) => [i.key, i.label])));
+// قائمة الصلاحيات لم تعد ثابتة بالكود — تُبنى من جدول permission_catalog في
+// قاعدة البيانات (المصدر الوحيد للحقيقة)، مجمّعة حسب group_name ومرتّبة حسب
+// sort_order كما هي معرّفة هناك. أي صلاحية تُضاف لاحقاً بقاعدة البيانات تظهر
+// هنا تلقائياً بدون أي تعديل على الكود.
+function buildPermissionGroups(permissionCatalog) {
+  const groups = [];
+  const byName = new Map();
+  (permissionCatalog || []).forEach((row) => {
+    if (!byName.has(row.group_name)) {
+      const g = { group: row.group_name, items: [] };
+      byName.set(row.group_name, g);
+      groups.push(g);
+    }
+    byName.get(row.group_name).items.push({ key: row.permission, label: row.label });
+  });
+  return groups;
+}
 
 function NewUserForm({ actions }) {
   const blank = { email: '', password: '', display_name: '', role: 'فني مختبر' };
@@ -267,7 +258,7 @@ function NewUserForm({ actions }) {
   );
 }
 
-function UserPermissionsRow({ user, isSelf, userPerms, actions, askConfirm }) {
+function UserPermissionsRow({ user, isSelf, userPerms, actions, askConfirm, permissionGroups }) {
   const [expanded, setExpanded] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
   const [newPw, setNewPw] = useState('');
@@ -341,8 +332,9 @@ function UserPermissionsRow({ user, isSelf, userPerms, actions, askConfirm }) {
       )}
       {expanded && !isManagerRole && (
         <tr style={{ background: C.bg }}><td colSpan={5} className="px-4 py-3">
+          {(!permissionGroups || permissionGroups.length === 0) && <EmptyState text="تعذّر تحميل قائمة الصلاحيات" />}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {PERMISSION_GROUPS.map((g) => (
+            {permissionGroups.map((g) => (
               <div key={g.group} className="rounded-md p-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
                 <div className="text-xs font-bold mb-2" style={{ color: C.accentDark }}>{g.group}</div>
                 <div className="space-y-1.5">
@@ -362,7 +354,8 @@ function UserPermissionsRow({ user, isSelf, userPerms, actions, askConfirm }) {
   );
 }
 
-function UsersPermissionsTab({ staff, permissions, actions, myId, askConfirm }) {
+function UsersPermissionsTab({ staff, permissions, actions, myId, askConfirm, permissionCatalog }) {
+  const permissionGroups = buildPermissionGroups(permissionCatalog);
   return (
     <div className="space-y-3">
       <NewUserForm actions={actions} />
@@ -384,6 +377,7 @@ function UsersPermissionsTab({ staff, permissions, actions, myId, askConfirm }) 
                 userPerms={new Set(permissions.filter((x) => x.user_id === p.id).map((x) => x.permission))}
                 actions={actions}
                 askConfirm={askConfirm}
+                permissionGroups={permissionGroups}
               />
             ))}
             {staff.length === 0 && <tr><td colSpan={5}><EmptyState text="لا يوجد موظفون بعد" /></td></tr>}
@@ -397,7 +391,7 @@ function UsersPermissionsTab({ staff, permissions, actions, myId, askConfirm }) 
 // ---------------------------------------------------------------------------
 // Settings (tabbed: tests / lab info / users & permissions)
 // ---------------------------------------------------------------------------
-function SettingsView({ catalog, inventory, orders, actions, askConfirm, isManager, can, staff, permissions, myId, labSettings }) {
+function SettingsView({ catalog, inventory, orders, actions, askConfirm, isManager, can, staff, permissions, permissionCatalog, myId, labSettings }) {
   const [tab, setTab] = useState('tests');
   const canManageUsers = isManager || (can && can('manage_users'));
   const tabs = [
@@ -417,7 +411,7 @@ function SettingsView({ catalog, inventory, orders, actions, askConfirm, isManag
       </div>
       {tab === 'tests' && <TestsTab catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
       {tab === 'lab' && <LabInfoTab labSettings={labSettings} actions={actions} isManager={isManager} can={can} />}
-      {tab === 'staff' && canManageUsers && <UsersPermissionsTab staff={staff} permissions={permissions} actions={actions} myId={myId} askConfirm={askConfirm} />}
+      {tab === 'staff' && canManageUsers && <UsersPermissionsTab staff={staff} permissions={permissions} actions={actions} myId={myId} askConfirm={askConfirm} permissionCatalog={permissionCatalog} />}
     </div>
   );
 }
