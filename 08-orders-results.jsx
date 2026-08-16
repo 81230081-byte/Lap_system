@@ -338,13 +338,14 @@ function ReportView({ order, patient, catalog, setView, labSettings }) {
             </div>
           </div>
           <div className="text-left text-xs font-mono" style={{ color: C.inkMuted }}>
+            <div>رقم التقرير: RPT-{order.id.slice(0, 8).toUpperCase()}</div>
             <div>رقم العينة: {order.sample_id}</div>
-            <div>التاريخ: {fmtDate(order.created_at)}</div>
-            {order.entered_by_name && <div>أُدخلت بواسطة: {order.entered_by_name}</div>}
-            {order.verified_by_name && <div>اعتمدت بواسطة: {order.verified_by_name}</div>}
+            <div>تاريخ الطلب: {fmtDate(order.created_at)}</div>
+            <div>تاريخ التقرير: {fmtDate(order.verified_at)}</div>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-6 text-sm">
+          <div><span style={{ color: C.inkMuted }}>رقم الملف: </span><span className="font-bold font-mono" style={{ color: C.ink }}>{patient?.file_no || '—'}</span></div>
           <div><span style={{ color: C.inkMuted }}>اسم المريض: </span><span className="font-bold" style={{ color: C.ink }}>{patient?.name}</span></div>
           <div><span style={{ color: C.inkMuted }}>العمر: </span><span className="font-bold font-mono" style={{ color: C.ink }}>{patient?.age}</span></div>
           <div><span style={{ color: C.inkMuted }}>الجنس: </span><span className="font-bold" style={{ color: C.ink }}>{patient?.gender}</span></div>
@@ -391,6 +392,31 @@ function ReportView({ order, patient, catalog, setView, labSettings }) {
           <span style={{ color: C.critical }}>↑ / ↓ خارج المعدل المرجعي</span>
           <span style={{ color: C.criticalDeep }}>⇑ / ⇓ يستدعي مراجعة الطبيب</span>
         </div>
+
+        <div className="mt-5 pt-4 flex flex-wrap items-end justify-between gap-4" style={{ borderTop: `1px solid ${C.line}` }}>
+          <div className="text-xs space-y-1" style={{ color: C.inkMuted }}>
+            {order.entered_by_name && <div>أُجري الفحص بواسطة: <span className="font-bold" style={{ color: C.ink }}>{order.entered_by_name}</span></div>}
+            {order.verified_by_name && (
+              <div className="mt-2 px-3 py-2 rounded-md inline-block" style={{ background: C.normalSoft, border: `1px solid ${C.normal}` }}>
+                <div className="font-bold" style={{ color: C.normal }}>✓ معتمَد إلكترونياً</div>
+                <div style={{ color: C.ink }}>{order.verified_by_name}</div>
+                <div className="font-mono" style={{ color: C.inkFaint }}>{fmtDateTime(order.verified_at)}</div>
+              </div>
+            )}
+          </div>
+          {labSettings?.portal_url && (
+            <div className="text-center">
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=${encodeURIComponent(labSettings.portal_url + '?sample=' + order.sample_id)}`}
+                alt="رمز الاستعلام عن النتيجة"
+                width={90} height={90}
+                style={{ border: `1px solid ${C.line}`, borderRadius: 6 }}
+              />
+              <div className="text-[10px] mt-1" style={{ color: C.inkFaint }}>امسح للاستعلام عن النتيجة</div>
+            </div>
+          )}
+        </div>
+
         <div className="mt-4 pt-4 text-xs text-center" style={{ borderTop: `1px solid ${C.line}`, color: C.inkFaint }}>{labSettings?.report_footer || 'هذا التقرير صادر إلكترونياً من نظام إدارة المختبر ولا يغني عن استشارة الطبيب المعالج'}</div>
         {labSettings?.portal_url && <div className="mt-2 text-xs text-center font-mono" style={{ color: C.inkFaint }}>يمكن الاستعلام عن النتائج لاحقاً عبر: {labSettings.portal_url}</div>}
       </div>
