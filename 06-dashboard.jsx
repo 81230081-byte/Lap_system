@@ -3,12 +3,12 @@
 // ---------------------------------------------------------------------------
 // أزرار الإجراءات السريعة للعمليات اليومية المتكررة
 // ---------------------------------------------------------------------------
-function QuickActions({ onQuickAction, canManageInventory }) {
+function QuickActions({ onQuickAction, canManageInventory, canBilling }) {
   const actions = [
     { key: 'new-order', label: 'إجراء فحص جديد', icon: '🧪' },
     { key: 'new-patient', label: 'مريض جديد', icon: '➕' },
     { key: 'new-appointment', label: 'حجز موعد', icon: '📅' },
-    { key: 'new-payment', label: 'تسجيل دفعة', icon: '💵' },
+    ...(canBilling ? [{ key: 'new-payment', label: 'تسجيل دفعة', icon: '💵' }] : []),
     { key: 'new-qc', label: 'فحص جودة', icon: '🧫' },
     ...(canManageInventory ? [{ key: 'new-inventory', label: 'صنف مخزون', icon: '📦' }] : []),
   ];
@@ -118,6 +118,7 @@ function Dashboard({ data, setView, setActiveOrderId, onQuickAction, isManager, 
   const { patients, catalog, orders, invoices, inventory, auditLog } = data;
   const showPerformance = isManager || (can && can('view_financial_reports'));
   const canManageInventory = isManager || (can && can('manage_inventory'));
+  const canBilling = isManager || (can && (can('view_invoices') || can('record_payments')));
   const pendingOrders = orders.filter((o) => o.status === 'pending');
   const pendingReviewOrders = orders.filter((o) => o.status === 'pending_review');
   const collected = invoices.reduce((s, i) => s + invoicePaid(i), 0);
@@ -145,7 +146,7 @@ function Dashboard({ data, setView, setActiveOrderId, onQuickAction, isManager, 
   return (
     <div className="p-6 space-y-6">
       <div className="text-2xl font-bold" style={{ color: C.ink }}>لوحة التحكم</div>
-      <QuickActions onQuickAction={onQuickAction} canManageInventory={canManageInventory} />
+      <QuickActions onQuickAction={onQuickAction} canManageInventory={canManageInventory} canBilling={canBilling} />
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatCard label="إجمالي المرضى" value={patients.length} />
         <StatCard label="عينات قيد الانتظار" value={pendingOrders.length} tone={pendingOrders.length ? 'warning' : undefined} />
