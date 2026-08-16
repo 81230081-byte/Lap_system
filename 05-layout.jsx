@@ -18,7 +18,7 @@ const NAV = [
   { key: 'settings', label: 'الإعدادات' },
 ];
 
-const MANAGER_ONLY_NAV_KEYS = ['treasury', 'financial-reports', 'audit', 'billing', 'suppliers'];
+const MANAGER_ONLY_NAV_KEYS = ['treasury', 'financial-reports', 'audit', 'billing', 'suppliers', 'qc'];
 // كل مفتاح يقابل قائمة صلاحيات — يكفي امتلاك واحدة منها لإظهار العنصر.
 // 'audit' يقبل الصلاحية القديمة (view_financial_reports) أو الجديدة (view_audit_log) معاً
 // حتى لا ينكسر وصول أي مستخدم كان يعتمد على الصلاحية القديمة.
@@ -28,6 +28,7 @@ const NAV_PERMISSION_KEYS = {
   audit: ['view_financial_reports', 'view_audit_log'],
   billing: ['view_invoices', 'record_payments'],
   suppliers: ['manage_suppliers', 'manage_purchases'],
+  qc: ['view_quality_control', 'manage_quality_control'],
 };
 
 function Sidebar({ view, setView, displayName, role, isManager, can, labName, logoSrc, onLogout, onExport, saveError }) {
