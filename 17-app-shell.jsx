@@ -210,6 +210,16 @@ function AppShell({ session }) {
       if (error) { notify('error', friendlyError(error)); throw error; }
       fetchOrdersOnly();
     },
+    updateSampleStatus: async (orderId, newStatus, rejectionReason, sampleId) => {
+      const { error } = await sb.rpc('update_sample_status', { p_order_id: orderId, p_new_status: newStatus, p_rejection_reason: rejectionReason || null, p_user_name: displayName, p_sample_id: sampleId });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchOrdersOnly();
+    },
+    redrawSample: async (originalOrderId, sampleId) => {
+      const { error } = await sb.rpc('redraw_sample', { p_original_order_id: originalOrderId, p_user_name: displayName, p_sample_id: sampleId });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchOrdersOnly();
+    },
 
     addPayment: async (invoiceId, amount, method, accountId) => {
       const { error } = await sb.rpc('add_payment', { p_invoice_id: invoiceId, p_amount: amount, p_method: method, p_user_name: displayName, p_account_id: accountId || null });
