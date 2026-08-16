@@ -15,6 +15,7 @@ function OrdersView({ patients, catalog, orders, inventory, accounts, actions, s
   const [statusFilter, setStatusFilter] = useState('all');
   const [busy, setBusy] = useState(false);
   const [rejectingOrder, setRejectingOrder] = useState(null);
+  const [ackOrder, setAckOrder] = useState(null);
 
   const knownDoctors = [...new Set(orders.map((o) => o.referring_doctor).filter(Boolean))];
   const cashAccounts = (accounts || []).filter((a) => a.type === 'نقدي');
@@ -165,6 +166,11 @@ function OrdersView({ patients, catalog, orders, inventory, accounts, actions, s
                         {o.status === 'pending' && <Badge tone="warning">قيد الانتظار</Badge>}
                         {o.status === 'pending_review' && <Badge tone="accent">بانتظار الاعتماد</Badge>}
                         {o.status === 'completed' && <Badge tone={o.has_critical ? 'critical' : 'normal'}>{o.has_critical ? 'مكتمل — حرج' : 'مكتمل'}</Badge>}
+                        {o.status === 'completed' && o.has_critical && (
+                          o.critical_acknowledged
+                            ? <div className="text-xs mt-1 font-bold" style={{ color: C.normal }}>✓ تم تأكيد المتابعة{o.critical_notified_doctor ? ' — أُشعر الطبيب' : ''}</div>
+                            : <div className="text-xs mt-1 font-bold" style={{ color: C.criticalDeep }}>⚠ يحتاج تأكيد المتابعة</div>
+                        )}
                         {o.status === 'cancelled' && <Badge tone="muted">ملغى</Badge>}
                         {o.status === 'pending' && o.rejection_note && <div className="text-xs mt-1" style={{ color: C.critical, maxWidth: 180 }}>أُرجعت: {o.rejection_note}</div>}
                       </td>
@@ -175,6 +181,7 @@ function OrdersView({ patients, catalog, orders, inventory, accounts, actions, s
                             ? <><button onClick={() => onVerify(o)} className="text-xs font-bold" style={{ color: C.normal }}>اعتماد</button><button onClick={() => setRejectingOrder(o)} className="text-xs font-bold" style={{ color: C.critical }}>إرجاع</button></>
                             : <span className="text-xs" style={{ color: C.inkFaint }}>بانتظار الاعتماد</span>)}
                           {o.status === 'completed' && <button onClick={() => { setActiveOrderId(o.id); setView('report'); }} className="text-xs font-bold" style={{ color: C.accent }}>التقرير</button>}
+                          {o.status === 'completed' && o.has_critical && !o.critical_acknowledged && <button onClick={() => setAckOrder(o)} className="text-xs font-bold" style={{ color: C.criticalDeep }}>تأكيد المتابعة</button>}
                         </div>
                       </td>
                     </tr>
@@ -188,6 +195,7 @@ function OrdersView({ patients, catalog, orders, inventory, accounts, actions, s
         </div>
       )}
       <RejectDialog order={rejectingOrder} onCancel={() => setRejectingOrder(null)} onConfirm={(reason) => { actions.rejectResults(rejectingOrder.id, rejectingOrder.sample_id, reason); setRejectingOrder(null); }} />
+      <AckCriticalDialog order={ackOrder} onCancel={() => setAckOrder(null)} onConfirm={(notifiedDoctor, notes) => { actions.acknowledgeCritical(ackOrder.id, notifiedDoctor, notes, ackOrder.sample_id); setAckOrder(null); }} />
     </div>
   );
 }
@@ -370,6 +378,33 @@ function ReportView({ order, patient, catalog, setView, labSettings }) {
         </div>
         <div className="mt-4 pt-4 text-xs text-center" style={{ borderTop: `1px solid ${C.line}`, color: C.inkFaint }}>{labSettings?.report_footer || 'هذا التقرير صادر إلكترونياً من نظام إدارة المختبر ولا يغني عن استشارة الطبيب المعالج'}</div>
         {labSettings?.portal_url && <div className="mt-2 text-xs text-center font-mono" style={{ color: C.inkFaint }}>يمكن الاستعلام عن النتائج لاحقاً عبر: {labSettings.portal_url}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// تأكيد متابعة نتيجة حرجة: يسجّل من راجعها ومتى، وهل تم إشعار الطبيب المعالج
+// ---------------------------------------------------------------------------
+function AckCriticalDialog({ order, onCancel, onConfirm }) {
+  const [notifiedDoctor, setNotifiedDoctor] = useState(false);
+  const [notes, setNotes] = useState('');
+  useEffect(() => { if (order) { setNotifiedDoctor(false); setNotes(''); } }, [order]);
+  if (!order) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(28,38,34,0.45)' }}>
+      <div className="w-full max-w-sm rounded-lg p-5" style={{ background: C.surface }}>
+        <div className="font-bold text-base mb-2" style={{ color: C.ink }}>تأكيد متابعة نتيجة حرجة</div>
+        <div className="text-sm mb-3" style={{ color: C.inkMuted }}>الطلب {order.sample_id} — يحتوي على قيمة تستدعي مراجعة عاجلة. أكّد أنك اطّلعت عليها وتعاملت معها.</div>
+        <label className="flex items-center gap-2 text-sm mb-3" style={{ color: C.ink }}>
+          <input type="checkbox" checked={notifiedDoctor} onChange={(e) => setNotifiedDoctor(e.target.checked)} />
+          تم إشعار الطبيب المعالج/المحوِّل بالنتيجة
+        </label>
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="w-full px-3 py-2 rounded-md text-sm mb-4" style={inputStyle} placeholder="ملاحظات المتابعة (اختياري)" />
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ color: C.inkMuted, border: `1px solid ${C.line}` }}>إلغاء</button>
+          <button onClick={() => onConfirm(notifiedDoctor, notes)} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ background: C.criticalDeep, color: '#fff' }}>تأكيد المتابعة</button>
+        </div>
       </div>
     </div>
   );
