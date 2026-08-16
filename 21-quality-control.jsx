@@ -5,9 +5,10 @@
 // ---------------------------------------------------------------------------
 function QCView({ qc, displayName, actions, isManager, can, askConfirm, pendingAction, clearPendingAction }) {
   const canDelete = isManager || (can && can('delete_qc'));
+  const canManage = isManager || (can && can('manage_quality_control'));
   const [showForm, setShowForm] = useState(false);
   useEffect(() => {
-    if (pendingAction === 'new-qc') { setShowForm(true); clearPendingAction(); }
+    if (pendingAction === 'new-qc' && canManage) { setShowForm(true); clearPendingAction(); }
   }, [pendingAction]);
   const [query, setQuery] = useState('');
   const [filterResult, setFilterResult] = useState('all'); // all | passed | failed
@@ -59,7 +60,7 @@ function QCView({ qc, displayName, actions, isManager, can, askConfirm, pendingA
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="text-2xl font-bold" style={{ color: C.ink }}>ضبط الجودة <span className="text-sm font-normal" style={{ color: C.inkMuted }}>({qc.length})</span></div>
-        <button onClick={() => (showForm ? resetForm() : setShowForm(true))} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>+ تسجيل فحص جودة</button>
+        {canManage && <button onClick={() => (showForm ? resetForm() : setShowForm(true))} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>+ تسجيل فحص جودة</button>}
       </div>
 
       {showFailBanner && (
@@ -68,7 +69,7 @@ function QCView({ qc, displayName, actions, isManager, can, askConfirm, pendingA
         </div>
       )}
 
-      {showForm && (
+      {showForm && canManage && (
         <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Field label="اسم الفحص/الجهاز">
