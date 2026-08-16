@@ -142,10 +142,16 @@ function Dashboard({ data, setView, setActiveOrderId, onQuickAction, isManager, 
     });
   });
   const criticalCount = flagged.filter((f) => f.critical).length;
+  const unackedCritical = orders.filter((o) => o.status === 'completed' && o.has_critical && !o.critical_acknowledged);
 
   return (
     <div className="p-6 space-y-6">
       <div className="text-2xl font-bold" style={{ color: C.ink }}>لوحة التحكم</div>
+      {unackedCritical.length > 0 && (
+        <button onClick={() => setView('orders')} className="w-full text-right rounded-lg px-4 py-3 text-sm font-bold" style={{ background: C.criticalDeepSoft, color: C.criticalDeep }}>
+          ⚠ يوجد {unackedCritical.length} نتيجة حرجة تحتاج تأكيد متابعة — اضغط لعرض الطلبات
+        </button>
+      )}
       <QuickActions onQuickAction={onQuickAction} canManageInventory={canManageInventory} canBilling={canBilling} />
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatCard label="إجمالي المرضى" value={patients.length} />
