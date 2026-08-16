@@ -89,6 +89,21 @@ const submitBtn = document.getElementById('submit-btn');
 const messageEl = document.getElementById('message');
 const reportEl = document.getElementById('report');
 
+// Prefill the sample ID from a QR code link (?sample=...) printed on the
+// report. The phone number is still required to actually look up the result —
+// this only saves the patient from retyping the sample number, it does not
+// bypass the phone-match check that protects other patients' results.
+(function prefillFromQuery() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const sample = params.get('sample');
+    if (sample) {
+      document.getElementById('sample-id').value = sample;
+      document.getElementById('phone').focus();
+    }
+  } catch (e) { /* ignore */ }
+})();
+
 function showMessage(text, type) {
   messageEl.textContent = text;
   messageEl.className = 'msg ' + type;
