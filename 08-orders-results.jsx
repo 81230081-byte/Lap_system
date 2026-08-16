@@ -1,5 +1,8 @@
 // الطلبات/العينات: الإنشاء، إدخال النتائج، الاعتماد أو الرفض، والتقرير القابل للطباعة
 
+const SAMPLE_STATUS_LABEL = { pending_collection: 'بانتظار السحب', collected: 'تم السحب', received: 'تم الاستلام', rejected: 'مرفوضة' };
+const SAMPLE_STATUS_TONE = { pending_collection: 'muted', collected: 'accent', received: 'normal', rejected: 'critical' };
+
 function OrdersView({ patients, catalog, orders, inventory, accounts, actions, setView, setActiveOrderId, filterPatientId, clearFilter, askConfirm, isManager, can, pendingAction, clearPendingAction }) {
   const canVerify = can ? can('verify_results') : isManager;
   const [tab, setTab] = useState('list');
@@ -16,6 +19,7 @@ function OrdersView({ patients, catalog, orders, inventory, accounts, actions, s
   const [busy, setBusy] = useState(false);
   const [rejectingOrder, setRejectingOrder] = useState(null);
   const [ackOrder, setAckOrder] = useState(null);
+  const [rejectingSample, setRejectingSample] = useState(null);
 
   const knownDoctors = [...new Set(orders.map((o) => o.referring_doctor).filter(Boolean))];
   const cashAccounts = (accounts || []).filter((a) => a.type === 'نقدي');
@@ -164,6 +168,12 @@ function OrdersView({ patients, catalog, orders, inventory, accounts, actions, s
                       <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>{fmtDate(o.created_at)}</td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         {o.status === 'pending' && <Badge tone="warning">قيد الانتظار</Badge>}
+                        {o.status === 'pending' && (
+                          <div className="text-xs mt-1" style={{ color: SAMPLE_STATUS_TONE[o.sample_status] === 'critical' ? C.critical : C.inkMuted }}>
+                            العينة: {SAMPLE_STATUS_LABEL[o.sample_status] || o.sample_status}
+                            {o.sample_status === 'rejected' && o.sample_rejection_reason ? ` — ${o.sample_rejection_reason}` : ''}
+                          </div>
+                        )}
                         {o.status === 'pending_review' && <Badge tone="accent">بانتظار الاعتماد</Badge>}
                         {o.status === 'completed' && <Badge tone={o.has_critical ? 'critical' : 'normal'}>{o.has_critical ? 'مكتمل — حرج' : 'مكتمل'}</Badge>}
                         {o.status === 'completed' && o.has_critical && (
@@ -176,7 +186,11 @@ function OrdersView({ patients, catalog, orders, inventory, accounts, actions, s
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex items-center gap-3">
-                          {o.status === 'pending' && <><button onClick={() => { setActiveOrderId(o.id); setView('results'); }} className="text-xs font-bold" style={{ color: C.accent }}>إدخال النتائج</button>{isManager && <button onClick={() => onCancel(o)} className="text-xs font-bold" style={{ color: C.critical }}>إلغاء</button>}</>}
+                          {o.status === 'pending' && o.sample_status !== 'rejected' && <><button onClick={() => { setActiveOrderId(o.id); setView('results'); }} className="text-xs font-bold" style={{ color: C.accent }}>إدخال النتائج</button>{isManager && <button onClick={() => onCancel(o)} className="text-xs font-bold" style={{ color: C.critical }}>إلغاء</button>}</>}
+                          {o.status === 'pending' && o.sample_status === 'pending_collection' && <button onClick={() => askConfirm({ title: 'تسجيل سحب العينة', message: `هل تم سحب عينة الطلب ${o.sample_id}؟`, confirmLabel: 'تم السحب', onConfirm: () => actions.updateSampleStatus(o.id, 'collected', null, o.sample_id) })} className="text-xs font-bold" style={{ color: C.accent }}>تسجيل السحب</button>}
+                          {o.status === 'pending' && o.sample_status === 'collected' && <button onClick={() => askConfirm({ title: 'تسجيل استلام العينة', message: `هل استُلمت عينة الطلب ${o.sample_id} بالمختبر؟`, confirmLabel: 'تم الاستلام', onConfirm: () => actions.updateSampleStatus(o.id, 'received', null, o.sample_id) })} className="text-xs font-bold" style={{ color: C.accent }}>تسجيل الاستلام</button>}
+                          {o.status === 'pending' && (o.sample_status === 'collected' || o.sample_status === 'received') && <button onClick={() => setRejectingSample(o)} className="text-xs font-bold" style={{ color: C.critical }}>رفض العينة</button>}
+                          {o.status === 'pending' && o.sample_status === 'rejected' && <button onClick={() => askConfirm({ title: 'إعادة سحب العينة', message: `سيتم إنشاء طلب بديل لإعادة سحب عينة ${o.sample_id} بنفس الفحوصات وبدون رسوم إضافية.`, confirmLabel: 'إعادة السحب', onConfirm: () => actions.redrawSample(o.id, o.sample_id) })} className="text-xs font-bold" style={{ color: C.accent }}>إعادة سحب</button>}
                           {o.status === 'pending_review' && (canVerify
                             ? <><button onClick={() => onVerify(o)} className="text-xs font-bold" style={{ color: C.normal }}>اعتماد</button><button onClick={() => setRejectingOrder(o)} className="text-xs font-bold" style={{ color: C.critical }}>إرجاع</button></>
                             : <span className="text-xs" style={{ color: C.inkFaint }}>بانتظار الاعتماد</span>)}
@@ -196,6 +210,7 @@ function OrdersView({ patients, catalog, orders, inventory, accounts, actions, s
       )}
       <RejectDialog order={rejectingOrder} onCancel={() => setRejectingOrder(null)} onConfirm={(reason) => { actions.rejectResults(rejectingOrder.id, rejectingOrder.sample_id, reason); setRejectingOrder(null); }} />
       <AckCriticalDialog order={ackOrder} onCancel={() => setAckOrder(null)} onConfirm={(notifiedDoctor, notes) => { actions.acknowledgeCritical(ackOrder.id, notifiedDoctor, notes, ackOrder.sample_id); setAckOrder(null); }} />
+      <RejectSampleDialog order={rejectingSample} onCancel={() => setRejectingSample(null)} onConfirm={(reason) => { actions.updateSampleStatus(rejectingSample.id, 'rejected', reason, rejectingSample.sample_id); setRejectingSample(null); }} />
     </div>
   );
 }
@@ -404,6 +419,28 @@ function AckCriticalDialog({ order, onCancel, onConfirm }) {
         <div className="flex justify-end gap-2">
           <button onClick={onCancel} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ color: C.inkMuted, border: `1px solid ${C.line}` }}>إلغاء</button>
           <button onClick={() => onConfirm(notifiedDoctor, notes)} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ background: C.criticalDeep, color: '#fff' }}>تأكيد المتابعة</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// رفض العينة: يتطلب سبباً واضحاً (تحلّل، كمية غير كافية، أنبوب خاطئ...)
+// ---------------------------------------------------------------------------
+function RejectSampleDialog({ order, onCancel, onConfirm }) {
+  const [reason, setReason] = useState('');
+  useEffect(() => { if (order) setReason(''); }, [order]);
+  if (!order) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(28,38,34,0.45)' }}>
+      <div className="w-full max-w-sm rounded-lg p-5" style={{ background: C.surface }}>
+        <div className="font-bold text-base mb-2" style={{ color: C.ink }}>رفض العينة</div>
+        <div className="text-sm mb-3" style={{ color: C.inkMuted }}>الطلب {order.sample_id} — وضّح سبب رفض العينة (تحلّل، كمية غير كافية، أنبوب غير مناسب...):</div>
+        <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} className="w-full px-3 py-2 rounded-md text-sm mb-4" style={inputStyle} placeholder="سبب الرفض (مطلوب)" />
+        <div className="flex justify-end gap-2">
+          <button onClick={onCancel} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ color: C.inkMuted, border: `1px solid ${C.line}` }}>إلغاء</button>
+          <button onClick={() => reason.trim() && onConfirm(reason.trim())} disabled={!reason.trim()} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ background: C.critical, color: '#fff', opacity: reason.trim() ? 1 : 0.5 }}>رفض العينة</button>
         </div>
       </div>
     </div>
