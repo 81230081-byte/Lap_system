@@ -272,10 +272,13 @@ function DoctorsCommissionTab({ orders, invoices, referringDoctors, commissionPa
   );
 }
 
-function FinancialReportsView({ accounts, transactions, invoices, purchases, orders, referringDoctors, commissionPayments, patients, suppliers, chartOfAccounts, journalLines, actions }) {
+function FinancialReportsView({ accounts, transactions, invoices, purchases, orders, referringDoctors, commissionPayments, patients, suppliers, chartOfAccounts, journalLines, catalog, staff, actions }) {
   const [tab, setTab] = useState('general');
   const TABS = [
     ['general', 'التقرير العام'],
+    ['top-tests', 'الفحوصات الأكثر طلباً'],
+    ['critical-log', 'سجل النتائج الحرجة'],
+    ['staff-performance', 'أداء الموظفين'],
     ['doctors', 'عمولات الأطباء'],
     ['customers', 'كشوفات حساب العملاء'],
     ['suppliers-stmt', 'كشوفات حساب الموردين'],
@@ -295,6 +298,9 @@ function FinancialReportsView({ accounts, transactions, invoices, purchases, ord
         </div>
       </div>
       {tab === 'general' && <GeneralReportTab accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} />}
+      {tab === 'top-tests' && <TopTestsTab orders={orders} catalog={catalog} />}
+      {tab === 'critical-log' && <CriticalResultsLogTab orders={orders} patients={patients} />}
+      {tab === 'staff-performance' && <StaffPerformanceTab orders={orders} staff={staff} />}
       {tab === 'doctors' && <DoctorsCommissionTab orders={orders} invoices={invoices} referringDoctors={referringDoctors} commissionPayments={commissionPayments} accounts={accounts} actions={actions} />}
       {tab === 'customers' && <CustomerStatementsTab patients={patients} orders={orders} invoices={invoices} />}
       {tab === 'suppliers-stmt' && <SupplierStatementsTab suppliers={suppliers} purchases={purchases} />}
@@ -302,6 +308,136 @@ function FinancialReportsView({ accounts, transactions, invoices, purchases, ord
       {tab === 'ledger' && <GeneralLedgerTab journalLines={journalLines} chartOfAccounts={chartOfAccounts} />}
       {tab === 'balance-sheet' && <BalanceSheetTab journalLines={journalLines} chartOfAccounts={chartOfAccounts} accounts={accounts} />}
       {tab === 'coa' && <ChartOfAccountsTab chartOfAccounts={chartOfAccounts} actions={actions} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// الفحوصات الأكثر طلباً: تكرار كل فحص عبر كل الطلبات (غير الملغاة)
+// ---------------------------------------------------------------------------
+function TopTestsTab({ orders, catalog }) {
+  const counts = {};
+  orders.filter((o) => o.status !== 'cancelled').forEach((o) => {
+    (o.test_ids || []).forEach((id) => { counts[id] = (counts[id] || 0) + 1; });
+  });
+  const ranked = Object.entries(counts)
+    .map(([id, count]) => ({ test: catalog.find((c) => c.id === id), count }))
+    .filter((r) => r.test)
+    .sort((a, b) => b.count - a.count);
+  const top10 = ranked.slice(0, 10);
+  const chartData = top10.map((r) => ({ label: r.test.short_name || r.test.name.slice(0, 10), value: r.count }));
+
+  return (
+    <div className="space-y-5">
+      {top10.length > 0 && (
+        <div className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="font-bold mb-3" style={{ color: C.ink }}>أعلى 10 فحوصات طلباً</div>
+          <BarChart data={chartData} barColor={C.accent} />
+        </div>
+      )}
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>#</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الفحص</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>القسم</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>عدد مرات الطلب</th>
+          </tr></thead>
+          <tbody>
+            {ranked.length === 0 && <tr><td colSpan={4}><EmptyState text="لا توجد بيانات كافية بعد" /></td></tr>}
+            {ranked.map((r, i) => (
+              <tr key={r.test.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="px-4 py-3 font-mono" style={{ color: C.inkMuted }}>{i + 1}</td>
+                <td className="px-4 py-3 font-bold" style={{ color: C.ink }}>{r.test.name}</td>
+                <td className="px-4 py-3" style={{ color: C.inkMuted }}>{r.test.category}</td>
+                <td className="px-4 py-3 font-mono font-bold" style={{ color: C.accent }}>{r.count}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// سجل النتائج الحرجة: كل الطلبات المكتملة اللي فيها قيمة حرجة، مع حالة المتابعة
+// ---------------------------------------------------------------------------
+function CriticalResultsLogTab({ orders, patients }) {
+  const critical = orders
+    .filter((o) => o.has_critical)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  const unacked = critical.filter((o) => !o.critical_acknowledged).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <StatCard label="إجمالي النتائج الحرجة" value={critical.length} />
+        <StatCard label="بانتظار تأكيد المتابعة" value={unacked} tone={unacked ? 'critical' : undefined} />
+        <StatCard label="تم إشعار الطبيب" value={critical.filter((o) => o.critical_notified_doctor).length} tone="normal" />
+      </div>
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>التاريخ</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المريض</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>العينة</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>أدخلها</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>اعتمدها</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المتابعة</th>
+          </tr></thead>
+          <tbody>
+            {critical.length === 0 && <tr><td colSpan={6}><EmptyState text="لا توجد نتائج حرجة مسجّلة" /></td></tr>}
+            {critical.map((o) => {
+              const patient = patients.find((p) => p.id === o.patient_id);
+              return (
+                <tr key={o.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <td className="px-4 py-3 font-mono text-xs" style={{ color: C.inkMuted }}>{fmtDateTime(o.created_at)}</td>
+                  <td className="px-4 py-3 font-bold" style={{ color: C.ink }}>{patient?.name || '—'}</td>
+                  <td className="px-4 py-3 font-mono" style={{ color: C.inkMuted }}>{o.sample_id}</td>
+                  <td className="px-4 py-3" style={{ color: C.inkMuted }}>{o.entered_by_name || '—'}</td>
+                  <td className="px-4 py-3" style={{ color: C.inkMuted }}>{o.verified_by_name || '—'}</td>
+                  <td className="px-4 py-3">
+                    {o.critical_acknowledged
+                      ? <span className="text-xs font-bold" style={{ color: C.normal }}>✓ {o.critical_acknowledged_by_name}{o.critical_notified_doctor ? ' (أُشعر الطبيب)' : ''}</span>
+                      : <span className="text-xs font-bold" style={{ color: C.criticalDeep }}>⚠ لم تُؤكَّد بعد</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+function StaffPerformanceTab({ orders, staff }) {
+  const entered = {}, verified = {}, rejected = {};
+  orders.forEach((o) => {
+    if (o.entered_by_name) entered[o.entered_by_name] = (entered[o.entered_by_name] || 0) + 1;
+    if (o.verified_by_name) verified[o.verified_by_name] = (verified[o.verified_by_name] || 0) + 1;
+  });
+  const names = [...new Set([...Object.keys(entered), ...Object.keys(verified)])].sort((a, b) => (entered[b] || 0) - (entered[a] || 0));
+
+  return (
+    <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+      <table className="w-full text-sm">
+        <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+          <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الموظف</th>
+          <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>نتائج أُدخلت</th>
+          <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>نتائج اعتُمدت</th>
+        </tr></thead>
+        <tbody>
+          {names.length === 0 && <tr><td colSpan={3}><EmptyState text="لا توجد بيانات كافية بعد" /></td></tr>}
+          {names.map((name) => (
+            <tr key={name} style={{ borderBottom: `1px solid ${C.line}` }}>
+              <td className="px-4 py-3 font-bold" style={{ color: C.ink }}>{name}</td>
+              <td className="px-4 py-3 font-mono" style={{ color: C.ink }}>{entered[name] || 0}</td>
+              <td className="px-4 py-3 font-mono" style={{ color: C.ink }}>{verified[name] || 0}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
