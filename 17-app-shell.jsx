@@ -516,7 +516,7 @@ function AppShell({ session }) {
       </div>
       <div className="flex-1 h-full flex flex-col overflow-hidden">
         <div className="no-print md:hidden flex items-center justify-between px-4 py-3" style={{ background: C.surface, borderBottom: `1px solid ${C.line}` }}>
-          <button onClick={() => setMobileNavOpen(true)} className="text-2xl leading-none px-1" style={{ color: C.ink }}>☰</button>
+          <button onClick={() => setMobileNavOpen(true)} aria-label="فتح القائمة" className="text-2xl leading-none px-1" style={{ color: C.ink }}>☰</button>
           <div className="font-bold text-sm" style={{ color: C.ink }}>{labSettings?.name || 'مختبر الشموخ'}</div>
           <div style={{ width: 24 }} />
         </div>
