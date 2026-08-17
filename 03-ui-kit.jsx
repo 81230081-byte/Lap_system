@@ -60,19 +60,24 @@ function Badge({ tone, children }) {
 function EmptyState({ text }) {
   return <div className="flex flex-col items-center justify-center py-10 text-center text-sm" style={{ color: C.inkFaint }}>{text}</div>;
 }
+// ملاحظة إمكانية الوصول: نستخدم عنصر <label> حقيقي (بدل <div>) لتغليف حقل
+// الإدخال. هذا يربط تلقائياً بين نص التسمية والحقل (بدون الحاجة لأي id/htmlFor
+// بكل استخدام)، فتقرأه برامج قراءة الشاشة بشكل صحيح، وتكبر مساحة اللمس القابلة
+// للنقر على التسمية نفسها (مفيد على الجوال). يعمل هذا لأن كل استخدامات Field
+// بالتطبيق تضع عنصر إدخال واحد (input/select/textarea) كـ children مباشرة.
 function Field({ label, children }) {
-  return <div><div className="text-xs font-bold mb-1" style={{ color: C.inkMuted }}>{label}</div>{children}</div>;
+  return <label className="block"><div className="text-xs font-bold mb-1" style={{ color: C.inkMuted }}>{label}</div>{children}</label>;
 }
 function ErrorNote({ children }) {
   if (!children) return null;
-  return <div className="text-xs font-bold px-3 py-2 rounded-md" style={{ background: C.criticalSoft, color: C.critical }}>{children}</div>;
+  return <div role="alert" className="text-xs font-bold px-3 py-2 rounded-md" style={{ background: C.criticalSoft, color: C.critical }}>{children}</div>;
 }
 function ConfirmDialog({ state, onCancel }) {
   if (!state || !state.open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(28,38,34,0.45)' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title" style={{ background: 'rgba(28,38,34,0.45)' }}>
       <div className="w-full max-w-sm rounded-lg p-5" style={{ background: C.surface }}>
-        <div className="font-bold text-base mb-2" style={{ color: C.ink }}>{state.title}</div>
+        <div id="confirm-dialog-title" className="font-bold text-base mb-2" style={{ color: C.ink }}>{state.title}</div>
         <div className="text-sm mb-5" style={{ color: C.inkMuted }}>{state.message}</div>
         <div className="flex justify-end gap-2">
           <button onClick={onCancel} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ color: C.inkMuted, border: `1px solid ${C.line}` }}>إلغاء</button>
@@ -87,9 +92,9 @@ function Toast({ toast, onDismiss }) {
   const isError = toast.type === 'error';
   return (
     <div className="fixed top-4 inset-x-0 z-50 flex justify-center px-4 pointer-events-none">
-      <div className="pointer-events-auto max-w-md w-full rounded-lg px-4 py-3 shadow-lg text-sm font-bold flex items-start gap-3" style={{ background: isError ? C.criticalSoft : C.normalSoft, color: isError ? C.critical : C.normal, border: `1px solid ${isError ? C.critical : C.normal}` }}>
+      <div role="status" aria-live="polite" className="pointer-events-auto max-w-md w-full rounded-lg px-4 py-3 shadow-lg text-sm font-bold flex items-start gap-3" style={{ background: isError ? C.criticalSoft : C.normalSoft, color: isError ? C.critical : C.normal, border: `1px solid ${isError ? C.critical : C.normal}` }}>
         <span className="flex-1">{toast.message}</span>
-        <button onClick={onDismiss} className="font-bold leading-none" style={{ color: 'inherit' }}>×</button>
+        <button onClick={onDismiss} aria-label="إغلاق الإشعار" className="font-bold leading-none" style={{ color: 'inherit' }}>×</button>
       </div>
     </div>
   );
@@ -98,11 +103,11 @@ function RejectDialog({ order, onCancel, onConfirm }) {
   const [reason, setReason] = useState('');
   if (!order) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(28,38,34,0.45)' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" style={{ background: 'rgba(28,38,34,0.45)' }}>
       <div className="w-full max-w-sm rounded-lg p-5" style={{ background: C.surface }}>
         <div className="font-bold text-base mb-2" style={{ color: C.ink }}>إرجاع النتائج لإعادة الإدخال</div>
         <div className="text-sm mb-3" style={{ color: C.inkMuted }}>الطلب {order.sample_id} — وضّح السبب (اختياري) ليتمكن الفني من التصحيح:</div>
-        <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} className="w-full px-3 py-2 rounded-md text-sm mb-4" style={inputStyle} placeholder="مثال: قيمة غير منطقية، يُرجى إعادة الفحص" />
+        <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} className="w-full px-3 py-2 rounded-md text-sm mb-4" style={inputStyle} placeholder="مثال: قيمة غير منطقية، يُرجى إعادة الفحص" aria-label="سبب إرجاع النتائج" />
         <div className="flex justify-end gap-2">
           <button onClick={onCancel} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ color: C.inkMuted, border: `1px solid ${C.line}` }}>إلغاء</button>
           <button onClick={() => onConfirm(reason)} className="px-3.5 py-2 rounded-md text-sm font-bold" style={{ background: C.critical, color: '#fff' }}>إرجاع النتائج</button>
@@ -122,11 +127,11 @@ function usePagination(items, perPage, resetKey) {
 function PaginationBar({ page, totalPages, setPage }) {
   if (totalPages <= 1) return null;
   return (
-    <div className="flex items-center justify-between px-4 py-3" style={{ borderTop: `1px solid ${C.line}` }}>
-      <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="text-xs font-bold" style={{ color: C.accent, opacity: page <= 1 ? 0.35 : 1 }}>‹ السابق</button>
+    <nav className="flex items-center justify-between px-4 py-3" aria-label="تصفّح الصفحات" style={{ borderTop: `1px solid ${C.line}` }}>
+      <button disabled={page <= 1} onClick={() => setPage(page - 1)} aria-label="الصفحة السابقة" className="text-xs font-bold" style={{ color: C.accent, opacity: page <= 1 ? 0.35 : 1 }}>‹ السابق</button>
       <div className="text-xs font-mono" style={{ color: C.inkMuted }}>صفحة {page} من {totalPages}</div>
-      <button disabled={page >= totalPages} onClick={() => setPage(page + 1)} className="text-xs font-bold" style={{ color: C.accent, opacity: page >= totalPages ? 0.35 : 1 }}>التالي ›</button>
-    </div>
+      <button disabled={page >= totalPages} onClick={() => setPage(page + 1)} aria-label="الصفحة التالية" className="text-xs font-bold" style={{ color: C.accent, opacity: page >= totalPages ? 0.35 : 1 }}>التالي ›</button>
+    </nav>
   );
 }
 
