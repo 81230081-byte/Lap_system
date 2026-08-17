@@ -278,6 +278,8 @@ function FinancialReportsView({ accounts, transactions, invoices, purchases, ord
     ['general', 'التقرير العام'],
     ['top-tests', 'الفحوصات الأكثر طلباً'],
     ['profitability', 'ربحية الفحوصات'],
+    ['ar-aging', 'أعمار ديون المرضى (AR)'],
+    ['ap-aging', 'أعمار ديون الموردين (AP)'],
     ['critical-log', 'سجل النتائج الحرجة'],
     ['staff-performance', 'أداء الموظفين'],
     ['doctors', 'عمولات الأطباء'],
@@ -301,6 +303,8 @@ function FinancialReportsView({ accounts, transactions, invoices, purchases, ord
       {tab === 'general' && <GeneralReportTab accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} />}
       {tab === 'top-tests' && <TopTestsTab orders={orders} catalog={catalog} />}
       {tab === 'profitability' && <TestProfitabilityTab orders={orders} catalog={catalog} testConsumables={testConsumables} inventory={inventory} />}
+      {tab === 'ar-aging' && <ARAgingTab patients={patients} orders={orders} invoices={invoices} />}
+      {tab === 'ap-aging' && <APAgingTab suppliers={suppliers} purchases={purchases} />}
       {tab === 'critical-log' && <CriticalResultsLogTab orders={orders} patients={patients} />}
       {tab === 'staff-performance' && <StaffPerformanceTab orders={orders} staff={staff} />}
       {tab === 'doctors' && <DoctorsCommissionTab orders={orders} invoices={invoices} referringDoctors={referringDoctors} commissionPayments={commissionPayments} accounts={accounts} actions={actions} />}
@@ -374,6 +378,140 @@ function TestProfitabilityTab({ orders, catalog, testConsumables, inventory }) {
                 <td className="px-4 py-3 font-mono" style={{ color: C.warning }}>{SAR(r.cost)}</td>
                 <td className="px-4 py-3 font-mono font-bold" style={{ color: r.profit >= 0 ? C.normal : C.critical }}>{SAR(r.profit)}</td>
                 <td className="px-4 py-3 font-mono font-bold" style={{ color: r.margin >= 0 ? C.normal : C.critical }}>{r.margin.toFixed(1)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// أعمار ديون المرضى (AR Aging): كل فاتورة غير مسدّدة بالكامل، مصنّفة حسب عمرها
+// ---------------------------------------------------------------------------
+function ageBucket(days) {
+  if (days <= 30) return 'current';
+  if (days <= 60) return '31-60';
+  if (days <= 90) return '61-90';
+  return '90+';
+}
+const AGE_BUCKET_LABEL = { current: 'حتى 30 يوم', '31-60': '31–60 يوم', '61-90': '61–90 يوم', '90+': 'أكثر من 90 يوم' };
+
+function ARAgingTab({ patients, orders, invoices }) {
+  const rows = invoices
+    .filter((inv) => !inv.voided)
+    .map((inv) => {
+      const remaining = Math.max(0, Number(inv.amount) - invoicePaid(inv));
+      if (remaining <= 0) return null;
+      const order = orders.find((o) => o.id === inv.order_id);
+      const patient = patients.find((p) => p.id === order?.patient_id);
+      const days = Math.floor((Date.now() - new Date(inv.created_at)) / 86400000);
+      return { patient, remaining, days, bucket: ageBucket(days), date: inv.created_at };
+    })
+    .filter(Boolean);
+
+  const byPatient = {};
+  rows.forEach((r) => {
+    const key = r.patient?.id || 'unknown';
+    if (!byPatient[key]) byPatient[key] = { patient: r.patient, current: 0, '31-60': 0, '61-90': 0, '90+': 0, total: 0 };
+    byPatient[key][r.bucket] += r.remaining;
+    byPatient[key].total += r.remaining;
+  });
+  const list = Object.values(byPatient).sort((a, b) => b.total - a.total);
+  const totals = list.reduce((acc, r) => ({ current: acc.current + r.current, '31-60': acc['31-60'] + r['31-60'], '61-90': acc['61-90'] + r['61-90'], '90+': acc['90+'] + r['90+'], total: acc.total + r.total }), { current: 0, '31-60': 0, '61-90': 0, '90+': 0, total: 0 });
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard label={AGE_BUCKET_LABEL.current} value={SAR(totals.current)} />
+        <StatCard label={AGE_BUCKET_LABEL['31-60']} value={SAR(totals['31-60'])} tone={totals['31-60'] ? 'warning' : undefined} />
+        <StatCard label={AGE_BUCKET_LABEL['61-90']} value={SAR(totals['61-90'])} tone={totals['61-90'] ? 'warning' : undefined} />
+        <StatCard label={AGE_BUCKET_LABEL['90+']} value={SAR(totals['90+'])} tone={totals['90+'] ? 'critical' : undefined} />
+      </div>
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المريض</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>{AGE_BUCKET_LABEL.current}</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>{AGE_BUCKET_LABEL['31-60']}</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>{AGE_BUCKET_LABEL['61-90']}</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>{AGE_BUCKET_LABEL['90+']}</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الإجمالي</th>
+          </tr></thead>
+          <tbody>
+            {list.length === 0 && <tr><td colSpan={6}><EmptyState text="لا توجد ديون غير مسدّدة" /></td></tr>}
+            {list.map((r, i) => (
+              <tr key={i} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="px-4 py-3 font-bold" style={{ color: C.ink }}>{r.patient?.name || 'غير معروف'}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: C.inkMuted }}>{r.current ? SAR(r.current) : '—'}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: r['31-60'] ? C.warning : C.inkMuted }}>{r['31-60'] ? SAR(r['31-60']) : '—'}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: r['61-90'] ? C.warning : C.inkMuted }}>{r['61-90'] ? SAR(r['61-90']) : '—'}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: r['90+'] ? C.critical : C.inkMuted }}>{r['90+'] ? SAR(r['90+']) : '—'}</td>
+                <td className="px-4 py-3 font-mono font-bold" style={{ color: C.ink }}>{SAR(r.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// أعمار ديون الموردين (AP Aging): فواتير الشراء الآجلة غير المسدّدة بالكامل
+// ---------------------------------------------------------------------------
+function APAgingTab({ suppliers, purchases }) {
+  const rows = purchases
+    .filter((p) => p.payment_type === 'آجل')
+    .map((p) => {
+      const paid = (p.purchase_payments || p.payments || []).reduce((s, x) => s + Number(x.amount), 0);
+      const remaining = Math.max(0, Number(p.total_amount) - paid);
+      if (remaining <= 0) return null;
+      const supplier = suppliers.find((s) => s.id === p.supplier_id);
+      const days = Math.floor((Date.now() - new Date(p.created_at)) / 86400000);
+      return { supplier, remaining, bucket: ageBucket(days) };
+    })
+    .filter(Boolean);
+
+  const bySupplier = {};
+  rows.forEach((r) => {
+    const key = r.supplier?.id || 'unknown';
+    if (!bySupplier[key]) bySupplier[key] = { supplier: r.supplier, current: 0, '31-60': 0, '61-90': 0, '90+': 0, total: 0 };
+    bySupplier[key][r.bucket] += r.remaining;
+    bySupplier[key].total += r.remaining;
+  });
+  const list = Object.values(bySupplier).sort((a, b) => b.total - a.total);
+  const totals = list.reduce((acc, r) => ({ current: acc.current + r.current, '31-60': acc['31-60'] + r['31-60'], '61-90': acc['61-90'] + r['61-90'], '90+': acc['90+'] + r['90+'], total: acc.total + r.total }), { current: 0, '31-60': 0, '61-90': 0, '90+': 0, total: 0 });
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard label={AGE_BUCKET_LABEL.current} value={SAR(totals.current)} />
+        <StatCard label={AGE_BUCKET_LABEL['31-60']} value={SAR(totals['31-60'])} tone={totals['31-60'] ? 'warning' : undefined} />
+        <StatCard label={AGE_BUCKET_LABEL['61-90']} value={SAR(totals['61-90'])} tone={totals['61-90'] ? 'warning' : undefined} />
+        <StatCard label={AGE_BUCKET_LABEL['90+']} value={SAR(totals['90+'])} tone={totals['90+'] ? 'critical' : undefined} />
+      </div>
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المورد</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>{AGE_BUCKET_LABEL.current}</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>{AGE_BUCKET_LABEL['31-60']}</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>{AGE_BUCKET_LABEL['61-90']}</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>{AGE_BUCKET_LABEL['90+']}</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الإجمالي</th>
+          </tr></thead>
+          <tbody>
+            {list.length === 0 && <tr><td colSpan={6}><EmptyState text="لا توجد ديون موردين غير مسدّدة" /></td></tr>}
+            {list.map((r, i) => (
+              <tr key={i} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="px-4 py-3 font-bold" style={{ color: C.ink }}>{r.supplier?.name || 'غير معروف'}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: C.inkMuted }}>{r.current ? SAR(r.current) : '—'}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: r['31-60'] ? C.warning : C.inkMuted }}>{r['31-60'] ? SAR(r['31-60']) : '—'}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: r['61-90'] ? C.warning : C.inkMuted }}>{r['61-90'] ? SAR(r['61-90']) : '—'}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: r['90+'] ? C.critical : C.inkMuted }}>{r['90+'] ? SAR(r['90+']) : '—'}</td>
+                <td className="px-4 py-3 font-mono font-bold" style={{ color: C.ink }}>{SAR(r.total)}</td>
               </tr>
             ))}
           </tbody>
