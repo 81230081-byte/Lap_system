@@ -272,11 +272,12 @@ function DoctorsCommissionTab({ orders, invoices, referringDoctors, commissionPa
   );
 }
 
-function FinancialReportsView({ accounts, transactions, invoices, purchases, orders, referringDoctors, commissionPayments, patients, suppliers, chartOfAccounts, journalLines, catalog, staff, actions }) {
+function FinancialReportsView({ accounts, transactions, invoices, purchases, orders, referringDoctors, commissionPayments, patients, suppliers, chartOfAccounts, journalLines, catalog, staff, testConsumables, inventory, actions }) {
   const [tab, setTab] = useState('general');
   const TABS = [
     ['general', 'التقرير العام'],
     ['top-tests', 'الفحوصات الأكثر طلباً'],
+    ['profitability', 'ربحية الفحوصات'],
     ['critical-log', 'سجل النتائج الحرجة'],
     ['staff-performance', 'أداء الموظفين'],
     ['doctors', 'عمولات الأطباء'],
@@ -299,6 +300,7 @@ function FinancialReportsView({ accounts, transactions, invoices, purchases, ord
       </div>
       {tab === 'general' && <GeneralReportTab accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} />}
       {tab === 'top-tests' && <TopTestsTab orders={orders} catalog={catalog} />}
+      {tab === 'profitability' && <TestProfitabilityTab orders={orders} catalog={catalog} testConsumables={testConsumables} inventory={inventory} />}
       {tab === 'critical-log' && <CriticalResultsLogTab orders={orders} patients={patients} />}
       {tab === 'staff-performance' && <StaffPerformanceTab orders={orders} staff={staff} />}
       {tab === 'doctors' && <DoctorsCommissionTab orders={orders} invoices={invoices} referringDoctors={referringDoctors} commissionPayments={commissionPayments} accounts={accounts} actions={actions} />}
@@ -308,6 +310,75 @@ function FinancialReportsView({ accounts, transactions, invoices, purchases, ord
       {tab === 'ledger' && <GeneralLedgerTab journalLines={journalLines} chartOfAccounts={chartOfAccounts} />}
       {tab === 'balance-sheet' && <BalanceSheetTab journalLines={journalLines} chartOfAccounts={chartOfAccounts} accounts={accounts} />}
       {tab === 'coa' && <ChartOfAccountsTab chartOfAccounts={chartOfAccounts} actions={actions} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ربحية الفحوصات: الإيراد (سعر البيع × مرات الطلب) مقابل التكلفة المباشرة
+// (مواد BOM × متوسط تكلفتها الحالي) لكل فحص
+// ---------------------------------------------------------------------------
+function TestProfitabilityTab({ orders, catalog, testConsumables, inventory }) {
+  const orderCounts = {};
+  orders.filter((o) => o.status !== 'cancelled').forEach((o) => {
+    (o.test_ids || []).forEach((id) => { orderCounts[id] = (orderCounts[id] || 0) + 1; });
+  });
+
+  const invCostById = Object.fromEntries(inventory.map((i) => [i.id, Number(i.avg_cost) || 0]));
+  const directCostByTest = {};
+  (testConsumables || []).forEach((tc) => {
+    const unitCost = invCostById[tc.item_id] || 0;
+    directCostByTest[tc.test_id] = (directCostByTest[tc.test_id] || 0) + Number(tc.qty) * unitCost;
+  });
+
+  const rows = Object.entries(orderCounts)
+    .map(([id, count]) => {
+      const test = catalog.find((c) => c.id === id);
+      if (!test) return null;
+      const unitCost = directCostByTest[id] || 0;
+      const revenue = Number(test.price) * count;
+      const cost = unitCost * count;
+      const profit = revenue - cost;
+      const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+      return { test, count, revenue, cost, profit, margin };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.revenue - a.revenue);
+
+  const hasCostData = inventory.some((i) => Number(i.avg_cost) > 0);
+
+  return (
+    <div className="space-y-4">
+      {!hasCostData && (
+        <div className="rounded-lg px-4 py-3 text-sm font-bold" style={{ background: C.warningSoft, color: C.warning }}>
+          ⚠ لا توجد تكلفة مسجّلة على أي صنف مخزون بعد — التكلفة والربحية هنا ستظهر صفر حتى تُسجَّل فواتير شراء حقيقية (التكلفة تُحسَب تلقائياً كمتوسط مرجّح من فواتير الشراء).
+        </div>
+      )}
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الفحص</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>مرات الطلب</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الإيراد</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>التكلفة المباشرة</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الربح الإجمالي</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>هامش الربح %</th>
+          </tr></thead>
+          <tbody>
+            {rows.length === 0 && <tr><td colSpan={6}><EmptyState text="لا توجد بيانات كافية بعد" /></td></tr>}
+            {rows.map((r) => (
+              <tr key={r.test.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="px-4 py-3 font-bold" style={{ color: C.ink }}>{r.test.name}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: C.inkMuted }}>{r.count}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: C.ink }}>{SAR(r.revenue)}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: C.warning }}>{SAR(r.cost)}</td>
+                <td className="px-4 py-3 font-mono font-bold" style={{ color: r.profit >= 0 ? C.normal : C.critical }}>{SAR(r.profit)}</td>
+                <td className="px-4 py-3 font-mono font-bold" style={{ color: r.margin >= 0 ? C.normal : C.critical }}>{r.margin.toFixed(1)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
