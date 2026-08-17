@@ -18,6 +18,7 @@ function AppShell({ session }) {
   const [staff, setStaff] = useState([]);
   const [permissions, setPermissions] = useState([]);
   const [permissionCatalog, setPermissionCatalog] = useState([]);
+  const [testConsumables, setTestConsumables] = useState([]);
   const [labSettings, setLabSettings] = useState(null);
   const [view, setView] = useState('dashboard');
   const [prevView, setPrevView] = useState(null);
@@ -65,7 +66,7 @@ function AppShell({ session }) {
 
   const fetchAll = async () => {
     try {
-      const [pRes, cRes, oRes, invRes, invenRes, aRes, profRes, permRes, pcRes, supRes, purRes, accRes, txRes, lsRes, rdRes, spRes, cpRes, coaRes, jlRes, apptRes, qcRes] = await Promise.all([
+      const [pRes, cRes, oRes, invRes, invenRes, aRes, profRes, permRes, pcRes, tcRes, supRes, purRes, accRes, txRes, lsRes, rdRes, spRes, cpRes, coaRes, jlRes, apptRes, qcRes] = await Promise.all([
         sb.from('patients').select('*').order('created_at', { ascending: false }),
         sb.from('catalog_tests').select('*').order('created_at'),
         sb.from('orders').select('*').order('created_at', { ascending: false }),
@@ -75,6 +76,7 @@ function AppShell({ session }) {
         sb.from('profiles').select('*').order('created_at'),
         sb.from('user_permissions').select('*'),
         sb.from('permission_catalog').select('*').order('sort_order'),
+        sb.from('test_consumables').select('*'),
         sb.from('suppliers').select('*').order('name'),
         sb.from('purchases').select('*, purchase_payments(*)').order('created_at', { ascending: false }),
         sb.from('accounts').select('*').order('created_at'),
@@ -101,6 +103,7 @@ function AppShell({ session }) {
       }
       if (permRes.data) setPermissions(permRes.data);
       if (pcRes.data) setPermissionCatalog(pcRes.data);
+      if (tcRes.data) setTestConsumables(tcRes.data);
       if (supRes.data) setSuppliers(supRes.data);
       if (purRes.data) setPurchases(purRes.data);
       if (accRes.data) setAccounts(accRes.data);
@@ -543,7 +546,7 @@ function AppShell({ session }) {
           {view === 'inventory' && <InventoryView inventory={inventory} catalog={catalog} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} pendingAction={pendingAction} clearPendingAction={clearPendingAction} />}
           {view === 'suppliers' && <SuppliersView suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} labSettings={labSettings} />}
           {view === 'treasury' && (isManager || can('view_treasury')) && <TreasuryView accounts={accounts} transactions={transactions} staff={staff} salaryPayments={salaryPayments} chartOfAccounts={chartOfAccounts} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
-          {view === 'financial-reports' && (isManager || can('view_financial_reports')) && <FinancialReportsView accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} orders={orders} referringDoctors={referringDoctors} commissionPayments={commissionPayments} patients={patients} suppliers={suppliers} chartOfAccounts={chartOfAccounts} journalLines={journalLines} catalog={catalog} staff={staff} actions={actions} />}
+          {view === 'financial-reports' && (isManager || can('view_financial_reports')) && <FinancialReportsView accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} orders={orders} referringDoctors={referringDoctors} commissionPayments={commissionPayments} patients={patients} suppliers={suppliers} chartOfAccounts={chartOfAccounts} journalLines={journalLines} catalog={catalog} staff={staff} testConsumables={testConsumables} inventory={inventory} actions={actions} />}
           {view === 'billing' && <BillingView invoices={invoices} orders={orders} patients={patients} accounts={accounts} actions={actions} />}
           {view === 'audit' && <AuditLogView auditLog={auditLog} />}
           {view === 'settings' && <SettingsView catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} staff={staff} permissions={permissions} permissionCatalog={permissionCatalog} myId={session.user.id} labSettings={labSettings} />}
