@@ -19,6 +19,8 @@ function AppShell({ session }) {
   const [permissions, setPermissions] = useState([]);
   const [permissionCatalog, setPermissionCatalog] = useState([]);
   const [testConsumables, setTestConsumables] = useState([]);
+  const [currencies, setCurrencies] = useState([]);
+  const [exchangeRates, setExchangeRates] = useState([]);
   const [labSettings, setLabSettings] = useState(null);
   const [view, setView] = useState('dashboard');
   const [prevView, setPrevView] = useState(null);
@@ -124,12 +126,26 @@ function AppShell({ session }) {
     }
   };
 
+  const fetchCurrencies = async () => {
+    const [curRes, rateRes] = await Promise.all([
+      sb.from('currencies').select('*').order('code'),
+      sb.from('exchange_rates').select('*').order('effective_from', { ascending: false }),
+    ]);
+    if (curRes.data) setCurrencies(curRes.data);
+    if (rateRes.data) setExchangeRates(rateRes.data);
+  };
+
   useEffect(() => {
     fetchAll();
+    fetchCurrencies();
     const channel = sb.channel('lab-changes')
       .on('postgres_changes', { event: '*', schema: 'public' }, () => fetchAll())
       .subscribe();
-    return () => sb.removeChannel(channel);
+    const currencyChannel = sb.channel('currency-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'currencies' }, () => fetchCurrencies())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'exchange_rates' }, () => fetchCurrencies())
+      .subscribe();
+    return () => { sb.removeChannel(channel); sb.removeChannel(currencyChannel); };
   }, []);
 
   // ---------------------------------------------------------------------
@@ -404,6 +420,21 @@ function AppShell({ session }) {
       await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل بيانات المختبر', p_details: '' });
       fetchLabSettingsOnly();
     },
+    addCurrency: async (name, code, symbol, decimalPlaces) => {
+      const { error } = await sb.from('currencies').insert({ name, code, symbol, decimal_places: decimalPlaces });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchCurrencies();
+    },
+    setCurrencyStatus: async (currencyId, status) => {
+      const { error } = await sb.from('currencies').update({ status }).eq('id', currencyId);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchCurrencies();
+    },
+    addExchangeRate: async (currencyId, rate, notes) => {
+      const { error } = await sb.rpc('add_exchange_rate', { p_currency_id: currencyId, p_rate: rate, p_notes: notes || null });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchCurrencies();
+    },
 
     updateStaffSalary: async (id, name, baseSalary) => {
       const { error } = await sb.from('profiles').update({ base_salary: baseSalary }).eq('id', id);
@@ -549,7 +580,7 @@ function AppShell({ session }) {
           {view === 'financial-reports' && (isManager || can('view_financial_reports')) && <FinancialReportsView accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} orders={orders} referringDoctors={referringDoctors} commissionPayments={commissionPayments} patients={patients} suppliers={suppliers} chartOfAccounts={chartOfAccounts} journalLines={journalLines} catalog={catalog} staff={staff} testConsumables={testConsumables} inventory={inventory} actions={actions} />}
           {view === 'billing' && <BillingView invoices={invoices} orders={orders} patients={patients} accounts={accounts} actions={actions} />}
           {view === 'audit' && <AuditLogView auditLog={auditLog} />}
-          {view === 'settings' && <SettingsView catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} staff={staff} permissions={permissions} permissionCatalog={permissionCatalog} myId={session.user.id} labSettings={labSettings} />}
+          {view === 'settings' && <SettingsView catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} staff={staff} permissions={permissions} permissionCatalog={permissionCatalog} myId={session.user.id} labSettings={labSettings} currencies={currencies} exchangeRates={exchangeRates} />}
         </main>
       </div>
       <ConfirmDialog state={confirmState} onCancel={closeConfirm} />
