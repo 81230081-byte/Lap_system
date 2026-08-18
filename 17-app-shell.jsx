@@ -21,6 +21,9 @@ function AppShell({ session }) {
   const [testConsumables, setTestConsumables] = useState([]);
   const [currencies, setCurrencies] = useState([]);
   const [exchangeRates, setExchangeRates] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+  const [fixedAssets, setFixedAssets] = useState([]);
+  const [accountingPeriods, setAccountingPeriods] = useState([]);
   const [labSettings, setLabSettings] = useState(null);
   const [view, setView] = useState('dashboard');
   const [prevView, setPrevView] = useState(null);
@@ -127,12 +130,18 @@ function AppShell({ session }) {
   };
 
   const fetchCurrencies = async () => {
-    const [curRes, rateRes] = await Promise.all([
+    const [curRes, rateRes, expRes, faRes, apRes] = await Promise.all([
       sb.from('currencies').select('*').order('code'),
       sb.from('exchange_rates').select('*').order('effective_from', { ascending: false }),
+      sb.from('expenses').select('*').order('created_at', { ascending: false }),
+      sb.from('fixed_assets').select('*').order('created_at', { ascending: false }),
+      sb.from('accounting_periods').select('*').order('start_date', { ascending: false }),
     ]);
     if (curRes.data) setCurrencies(curRes.data);
     if (rateRes.data) setExchangeRates(rateRes.data);
+    if (expRes.data) setExpenses(expRes.data);
+    if (faRes.data) setFixedAssets(faRes.data);
+    if (apRes.data) setAccountingPeriods(apRes.data);
   };
 
   useEffect(() => {
@@ -144,6 +153,9 @@ function AppShell({ session }) {
     const currencyChannel = sb.channel('currency-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'currencies' }, () => fetchCurrencies())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'exchange_rates' }, () => fetchCurrencies())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => fetchCurrencies())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'fixed_assets' }, () => fetchCurrencies())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_periods' }, () => fetchCurrencies())
       .subscribe();
     return () => { sb.removeChannel(channel); sb.removeChannel(currencyChannel); };
   }, []);
@@ -435,6 +447,32 @@ function AppShell({ session }) {
       if (error) { notify('error', friendlyError(error)); throw error; }
       fetchCurrencies();
     },
+    createExpense: async (coaId, accountId, amount, description, reference) => {
+      const { error } = await sb.rpc('create_expense', { p_coa_id: coaId, p_account_id: accountId, p_amount: amount, p_description: description, p_reference: reference, p_user_name: displayName });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll(); fetchCurrencies();
+    },
+    createFixedAsset: async (name, category, coaCode, purchaseDate, cost, usefulLifeYears, residualValue, accountId, location) => {
+      const { error } = await sb.rpc('create_fixed_asset', { p_name: name, p_category: category, p_coa_code: coaCode, p_purchase_date: purchaseDate, p_purchase_cost: cost, p_useful_life_years: usefulLifeYears, p_residual_value: residualValue, p_account_id: accountId, p_location: location, p_user_name: displayName });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll(); fetchCurrencies();
+    },
+    runMonthlyDepreciation: async (period) => {
+      const { data, error } = await sb.rpc('run_monthly_depreciation', { p_period: period, p_user_name: displayName });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      notify('success', `تم احتساب إهلاك ${data ?? 0} أصل لفترة ${period}`);
+      fetchCurrencies();
+    },
+    closeAccountingPeriod: async (periodName, startDate, endDate) => {
+      const { error } = await sb.rpc('close_accounting_period', { p_period_name: periodName, p_start_date: startDate, p_end_date: endDate, p_user_name: displayName });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchCurrencies();
+    },
+    reopenAccountingPeriod: async (periodName) => {
+      const { error } = await sb.rpc('reopen_accounting_period', { p_period_name: periodName, p_user_name: displayName });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchCurrencies();
+    },
 
     updateStaffSalary: async (id, name, baseSalary) => {
       const { error } = await sb.from('profiles').update({ base_salary: baseSalary }).eq('id', id);
@@ -576,7 +614,7 @@ function AppShell({ session }) {
           {view === 'history' && <PatientHistoryView patient={historyPatient} orders={orders} catalog={catalog} setView={goTo} setActiveOrderId={setActiveOrderId} labSettings={labSettings} />}
           {view === 'inventory' && <InventoryView inventory={inventory} catalog={catalog} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} pendingAction={pendingAction} clearPendingAction={clearPendingAction} />}
           {view === 'suppliers' && <SuppliersView suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} labSettings={labSettings} />}
-          {view === 'treasury' && (isManager || can('view_treasury')) && <TreasuryView accounts={accounts} transactions={transactions} staff={staff} salaryPayments={salaryPayments} chartOfAccounts={chartOfAccounts} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
+          {view === 'treasury' && (isManager || can('view_treasury')) && <TreasuryView accounts={accounts} transactions={transactions} staff={staff} salaryPayments={salaryPayments} chartOfAccounts={chartOfAccounts} expenses={expenses} fixedAssets={fixedAssets} accountingPeriods={accountingPeriods} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
           {view === 'financial-reports' && (isManager || can('view_financial_reports')) && <FinancialReportsView accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} orders={orders} referringDoctors={referringDoctors} commissionPayments={commissionPayments} patients={patients} suppliers={suppliers} chartOfAccounts={chartOfAccounts} journalLines={journalLines} catalog={catalog} staff={staff} testConsumables={testConsumables} inventory={inventory} actions={actions} />}
           {view === 'billing' && <BillingView invoices={invoices} orders={orders} patients={patients} accounts={accounts} actions={actions} />}
           {view === 'audit' && <AuditLogView auditLog={auditLog} />}
