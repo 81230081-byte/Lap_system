@@ -265,20 +265,260 @@ function PayrollTab({ staff, accounts, salaryPayments, actions }) {
   );
 }
 
-function TreasuryView({ accounts, transactions, staff, salaryPayments, chartOfAccounts, actions, askConfirm, isManager }) {
+function TreasuryView({ accounts, transactions, staff, salaryPayments, chartOfAccounts, expenses, fixedAssets, accountingPeriods, actions, askConfirm, isManager, can }) {
   const [tab, setTab] = useState('accounts');
+  const canExpenses = isManager || (can && can('manage_expenses'));
+  const canAssets = isManager || (can && can('manage_fixed_assets'));
+  const canPeriods = isManager || (can && can('close_accounting_period'));
+  const TABS = [
+    ['accounts', 'الحسابات'],
+    ['payroll', 'الرواتب'],
+    ...(canExpenses ? [['expenses', 'المصروفات']] : []),
+    ...(canAssets ? [['assets', 'الأصول الثابتة']] : []),
+    ...(canPeriods ? [['periods', 'الفترات المحاسبية']] : []),
+  ];
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="text-2xl font-bold" style={{ color: C.ink }}>الصناديق والبنوك</div>
-        <div className="flex rounded-lg overflow-hidden" style={{ border: `1px solid ${C.line}` }}>
-          <button onClick={() => setTab('accounts')} className="px-4 py-2 text-sm font-bold" style={{ background: tab === 'accounts' ? C.accent : C.surface, color: tab === 'accounts' ? '#fff' : C.inkMuted }}>الحسابات</button>
-          <button onClick={() => setTab('payroll')} className="px-4 py-2 text-sm font-bold" style={{ background: tab === 'payroll' ? C.accent : C.surface, color: tab === 'payroll' ? '#fff' : C.inkMuted }}>الرواتب</button>
+        <div className="flex flex-wrap rounded-lg overflow-hidden" style={{ border: `1px solid ${C.line}` }}>
+          {TABS.map(([key, label]) => (
+            <button key={key} onClick={() => setTab(key)} className="px-4 py-2 text-sm font-bold" style={{ background: tab === key ? C.accent : C.surface, color: tab === key ? '#fff' : C.inkMuted }}>{label}</button>
+          ))}
         </div>
       </div>
-      {tab === 'accounts'
-        ? <AccountsTab accounts={accounts} transactions={transactions} chartOfAccounts={chartOfAccounts} actions={actions} askConfirm={askConfirm} isManager={isManager} />
-        : <PayrollTab staff={staff} accounts={accounts} salaryPayments={salaryPayments} actions={actions} />}
+      {tab === 'accounts' && <AccountsTab accounts={accounts} transactions={transactions} chartOfAccounts={chartOfAccounts} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
+      {tab === 'payroll' && <PayrollTab staff={staff} accounts={accounts} salaryPayments={salaryPayments} actions={actions} />}
+      {tab === 'expenses' && canExpenses && <ExpensesTab expenses={expenses} accounts={accounts} chartOfAccounts={chartOfAccounts} actions={actions} />}
+      {tab === 'assets' && canAssets && <FixedAssetsTab fixedAssets={fixedAssets} accounts={accounts} chartOfAccounts={chartOfAccounts} actions={actions} askConfirm={askConfirm} />}
+      {tab === 'periods' && canPeriods && <AccountingPeriodsTab accountingPeriods={accountingPeriods} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// المصروفات: تسجيل مصروف رسمي مربوط بحساب من الشجرة وقيد محاسبي تلقائي
+// ---------------------------------------------------------------------------
+function ExpensesTab({ expenses, accounts, chartOfAccounts, actions }) {
+  const expenseAccounts = chartOfAccounts.filter((a) => a.type === 'expense' && a.is_active);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ coa_id: '', account_id: accounts[0]?.id || '', amount: '', description: '', reference: '' });
+  const [error, setError] = useState('');
+  const { page, setPage, totalPages, pageItems } = usePagination(expenses.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at)), 8);
+
+  const submit = async () => {
+    if (!form.coa_id) { setError('اختر حساب المصروف'); return; }
+    if (!form.account_id) { setError('اختر الصندوق/الحساب الدافع'); return; }
+    const amount = Number(form.amount);
+    if (!amount || amount <= 0) { setError('المبلغ يجب أن يكون أكبر من صفر'); return; }
+    setError('');
+    await actions.createExpense(form.coa_id, form.account_id, amount, form.description.trim() || null, form.reference.trim() || null);
+    setForm({ coa_id: '', account_id: accounts[0]?.id || '', amount: '', description: '', reference: '' });
+    setShowForm(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <button onClick={() => setShowForm(!showForm)} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>+ مصروف جديد</button>
+      </div>
+      {showForm && (
+        <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Field label="نوع المصروف">
+              <select value={form.coa_id} onChange={(e) => setForm({ ...form, coa_id: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+                <option value="">اختر...</option>
+                {expenseAccounts.map((a) => <option key={a.id} value={a.id}>{a.name_ar}</option>)}
+              </select>
+            </Field>
+            <Field label="الصندوق/الحساب الدافع">
+              <select value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </Field>
+            <Field label="المبلغ"><input type="number" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+            <Field label="مرجع (اختياري)"><input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+          </div>
+          <Field label="الوصف"><input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} placeholder="مثال: فاتورة كهرباء شهر أغسطس" /></Field>
+          <ErrorNote>{error}</ErrorNote>
+          <button onClick={submit} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>حفظ المصروف</button>
+        </div>
+      )}
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>رقم المصروف</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>التاريخ</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الوصف</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المبلغ</th>
+          </tr></thead>
+          <tbody>
+            {pageItems.length === 0 && <tr><td colSpan={4}><EmptyState text="لا توجد مصروفات مسجّلة" /></td></tr>}
+            {pageItems.map((e) => (
+              <tr key={e.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="px-4 py-3 font-mono" style={{ color: C.inkMuted }}>{e.expense_number}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: C.inkMuted }}>{fmtDate(e.expense_date)}</td>
+                <td className="px-4 py-3" style={{ color: C.ink }}>{e.description || '—'}</td>
+                <td className="px-4 py-3 font-mono font-bold" style={{ color: C.critical }}>{SAR(e.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <PaginationBar page={page} totalPages={totalPages} setPage={setPage} />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// الأصول الثابتة: تسجيل الأصل + تشغيل الإهلاك الشهري لكل الأصول دفعة واحدة
+// ---------------------------------------------------------------------------
+const ASSET_CATEGORIES = ['Laboratory Equipment', 'Computers', 'Furniture', 'Vehicles', 'Other'];
+const ASSET_CATEGORY_LABEL = { 'Laboratory Equipment': 'معدات مختبر', 'Computers': 'أجهزة حاسوب', 'Furniture': 'أثاث', 'Vehicles': 'مركبات', 'Other': 'أخرى' };
+const ASSET_CATEGORY_COA = { 'Laboratory Equipment': '1410', 'Computers': '1420', 'Furniture': '1430', 'Vehicles': '1440', 'Other': '1450' };
+
+function FixedAssetsTab({ fixedAssets, accounts, chartOfAccounts, actions, askConfirm }) {
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ name: '', category: 'Laboratory Equipment', purchase_date: new Date().toISOString().slice(0, 10), purchase_cost: '', useful_life_years: '', residual_value: '0', account_id: accounts[0]?.id || '', location: '' });
+  const [error, setError] = useState('');
+  const [runningDepreciation, setRunningDepreciation] = useState(false);
+
+  const submit = async () => {
+    if (!form.name.trim()) { setError('اسم الأصل مطلوب'); return; }
+    const cost = Number(form.purchase_cost), life = Number(form.useful_life_years), residual = Number(form.residual_value) || 0;
+    if (!cost || cost <= 0) { setError('تكلفة الشراء يجب أن تكون أكبر من صفر'); return; }
+    if (!life || life <= 0) { setError('العمر الإنتاجي (بالسنوات) مطلوب'); return; }
+    if (residual >= cost) { setError('القيمة التخريدية يجب أن تكون أقل من التكلفة'); return; }
+    if (!form.account_id) { setError('اختر حساب الدفع'); return; }
+    setError('');
+    await actions.createFixedAsset(form.name.trim(), form.category, ASSET_CATEGORY_COA[form.category], form.purchase_date, cost, life, residual, form.account_id, form.location.trim() || null);
+    setForm({ name: '', category: 'Laboratory Equipment', purchase_date: new Date().toISOString().slice(0, 10), purchase_cost: '', useful_life_years: '', residual_value: '0', account_id: accounts[0]?.id || '', location: '' });
+    setShowForm(false);
+  };
+
+  const runDepreciation = () => {
+    const period = new Date().toISOString().slice(0, 7); // YYYY-MM
+    askConfirm({
+      title: 'تشغيل الإهلاك الشهري',
+      message: `سيتم احتساب وترحيل إهلاك شهر ${period} لكل الأصول النشطة التي لم يُحتسب إهلاكها هذا الشهر بعد. هذا الإجراء لا يمكن التراجع عنه إلا بعكس القيود يدوياً.`,
+      confirmLabel: 'تشغيل الإهلاك',
+      onConfirm: async () => { setRunningDepreciation(true); await actions.runMonthlyDepreciation(period); setRunningDepreciation(false); },
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end gap-2">
+        <button onClick={runDepreciation} disabled={runningDepreciation} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.accent, opacity: runningDepreciation ? 0.6 : 1 }}>{runningDepreciation ? '...جارِ الاحتساب' : 'تشغيل الإهلاك الشهري'}</button>
+        <button onClick={() => setShowForm(!showForm)} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>+ أصل ثابت جديد</button>
+      </div>
+      {showForm && (
+        <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Field label="اسم الأصل"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} placeholder="مثال: جهاز CBC تلقائي" /></Field>
+            <Field label="التصنيف">
+              <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+                {ASSET_CATEGORIES.map((c) => <option key={c} value={c}>{ASSET_CATEGORY_LABEL[c]}</option>)}
+              </select>
+            </Field>
+            <Field label="تاريخ الشراء"><input type="date" value={form.purchase_date} onChange={(e) => setForm({ ...form, purchase_date: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+            <Field label="تكلفة الشراء"><input type="number" min="0" value={form.purchase_cost} onChange={(e) => setForm({ ...form, purchase_cost: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+            <Field label="العمر الإنتاجي (سنوات)"><input type="number" min="1" value={form.useful_life_years} onChange={(e) => setForm({ ...form, useful_life_years: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+            <Field label="القيمة التخريدية"><input type="number" min="0" value={form.residual_value} onChange={(e) => setForm({ ...form, residual_value: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+            <Field label="حساب الدفع">
+              <select value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </Field>
+            <Field label="الموقع (اختياري)"><input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+          </div>
+          <ErrorNote>{error}</ErrorNote>
+          <button onClick={submit} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>حفظ الأصل</button>
+        </div>
+      )}
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الكود</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الاسم</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>التصنيف</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>التكلفة</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>مجمّع الإهلاك</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>القيمة الدفترية</th>
+          </tr></thead>
+          <tbody>
+            {fixedAssets.length === 0 && <tr><td colSpan={6}><EmptyState text="لا توجد أصول ثابتة مسجّلة" /></td></tr>}
+            {fixedAssets.map((a) => (
+              <tr key={a.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="px-4 py-3 font-mono" style={{ color: C.inkMuted }}>{a.asset_code}</td>
+                <td className="px-4 py-3 font-bold" style={{ color: C.ink }}>{a.name}</td>
+                <td className="px-4 py-3" style={{ color: C.inkMuted }}>{ASSET_CATEGORY_LABEL[a.category] || a.category}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: C.ink }}>{SAR(a.purchase_cost)}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: C.warning }}>{SAR(a.accumulated_depreciation)}</td>
+                <td className="px-4 py-3 font-mono font-bold" style={{ color: C.accent }}>{SAR(a.purchase_cost - a.accumulated_depreciation)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// الفترات المحاسبية: إغلاق/إعادة فتح فترة (بعد التحقق من توازنها)
+// ---------------------------------------------------------------------------
+function AccountingPeriodsTab({ accountingPeriods, actions, askConfirm, isManager }) {
+  const [form, setForm] = useState({ period_name: new Date().toISOString().slice(0, 7), start_date: '', end_date: '' });
+  const [error, setError] = useState('');
+
+  const close = async () => {
+    if (!form.start_date || !form.end_date) { setError('حدّد تاريخ بداية ونهاية الفترة'); return; }
+    setError('');
+    askConfirm({
+      title: 'إغلاق فترة محاسبية',
+      message: `بعد الإغلاق، لن يُسمح بأي عملية مالية جديدة بتاريخ ضمن ${form.start_date} → ${form.end_date} إلا لمن يملك صلاحية خاصة. هل أنت متأكد؟`,
+      danger: true,
+      confirmLabel: 'إغلاق الفترة',
+      onConfirm: () => actions.closeAccountingPeriod(form.period_name, form.start_date, form.end_date),
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <div className="font-bold" style={{ color: C.ink }}>إغلاق فترة جديدة</div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <Field label="اسم الفترة"><input value={form.period_name} onChange={(e) => setForm({ ...form, period_name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} placeholder="2026-08" /></Field>
+          <Field label="من تاريخ"><input type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+          <Field label="إلى تاريخ"><input type="date" value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+        </div>
+        <ErrorNote>{error}</ErrorNote>
+        <button onClick={close} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.critical, color: '#fff' }}>إغلاق الفترة</button>
+      </div>
+      <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <table className="w-full text-sm">
+          <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الفترة</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>من — إلى</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الحالة</th>
+            <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}></th>
+          </tr></thead>
+          <tbody>
+            {accountingPeriods.length === 0 && <tr><td colSpan={4}><EmptyState text="لا توجد فترات مقفلة بعد" /></td></tr>}
+            {accountingPeriods.map((p) => (
+              <tr key={p.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                <td className="px-4 py-3 font-mono font-bold" style={{ color: C.ink }}>{p.period_name}</td>
+                <td className="px-4 py-3 font-mono" style={{ color: C.inkMuted }}>{p.start_date} → {p.end_date}</td>
+                <td className="px-4 py-3"><Badge tone={p.status === 'closed' ? 'critical' : 'normal'}>{p.status === 'closed' ? 'مقفلة' : 'مفتوحة'}</Badge></td>
+                <td className="px-4 py-3">
+                  {p.status === 'closed' && isManager && <button onClick={() => askConfirm({ title: 'إعادة فتح الفترة', message: `هل تريد إعادة فتح ${p.period_name}؟`, onConfirm: () => actions.reopenAccountingPeriod(p.period_name) })} className="text-xs font-bold" style={{ color: C.accent }}>إعادة فتح</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
