@@ -391,12 +391,14 @@ function UsersPermissionsTab({ staff, permissions, actions, myId, askConfirm, pe
 // ---------------------------------------------------------------------------
 // Settings (tabbed: tests / lab info / users & permissions)
 // ---------------------------------------------------------------------------
-function SettingsView({ catalog, inventory, orders, actions, askConfirm, isManager, can, staff, permissions, permissionCatalog, myId, labSettings }) {
+function SettingsView({ catalog, inventory, orders, actions, askConfirm, isManager, can, staff, permissions, permissionCatalog, myId, labSettings, currencies, exchangeRates }) {
   const [tab, setTab] = useState('tests');
   const canManageUsers = isManager || (can && can('manage_users'));
+  const canManageCurrencies = isManager || (can && (can('manage_currencies') || can('manage_exchange_rates')));
   const tabs = [
     { key: 'tests', label: 'الفحوصات' },
     { key: 'lab', label: 'بيانات المختبر' },
+    ...(canManageCurrencies ? [{ key: 'currencies', label: 'العملات' }] : []),
     ...(canManageUsers ? [{ key: 'staff', label: 'المستخدمون والصلاحيات' }] : []),
   ];
   return (
@@ -411,7 +413,121 @@ function SettingsView({ catalog, inventory, orders, actions, askConfirm, isManag
       </div>
       {tab === 'tests' && <TestsTab catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
       {tab === 'lab' && <LabInfoTab labSettings={labSettings} actions={actions} isManager={isManager} can={can} />}
+      {tab === 'currencies' && canManageCurrencies && <CurrenciesTab currencies={currencies} exchangeRates={exchangeRates} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
       {tab === 'staff' && canManageUsers && <UsersPermissionsTab staff={staff} permissions={permissions} actions={actions} myId={myId} askConfirm={askConfirm} permissionCatalog={permissionCatalog} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// العملات وأسعار الصرف: الريال اليمني عملة أساسية ثابتة لا يمكن تعديلها أو
+// تعطيلها. أسعار الصرف التاريخية غير قابلة للتعديل — أي تغيير يُغلق السعر
+// القديم (زمنياً) ويضيف سعراً جديداً، فتبقى المعاملات القديمة بسعرها الأصلي.
+// ---------------------------------------------------------------------------
+function CurrenciesTab({ currencies, exchangeRates, actions, askConfirm, isManager, can }) {
+  const canManageCurrencies = isManager || (can && can('manage_currencies'));
+  const canManageRates = isManager || (can && (can('manage_currencies') || can('manage_exchange_rates')));
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ name: '', code: '', symbol: '', decimal_places: '2' });
+  const [error, setError] = useState('');
+  const [rateFormFor, setRateFormFor] = useState(null);
+  const [rateValue, setRateValue] = useState('');
+  const [rateNotes, setRateNotes] = useState('');
+
+  const currentRateFor = (currencyId) => exchangeRates.find((r) => r.currency_id === currencyId && !r.effective_to);
+  const historyFor = (currencyId) => exchangeRates.filter((r) => r.currency_id === currencyId).sort((a, b) => new Date(b.effective_from) - new Date(a.effective_from));
+
+  const submit = async () => {
+    if (!form.name.trim() || !form.code.trim() || !form.symbol.trim()) { setError('كل الحقول مطلوبة'); return; }
+    if (form.code.trim().length !== 3) { setError('كود العملة يجب أن يكون 3 أحرف (مثال: USD)'); return; }
+    setError('');
+    await actions.addCurrency(form.name.trim(), form.code.trim().toUpperCase(), form.symbol.trim(), Number(form.decimal_places) || 2);
+    setForm({ name: '', code: '', symbol: '', decimal_places: '2' });
+    setShowForm(false);
+  };
+
+  const submitRate = async (currencyId) => {
+    const rate = Number(rateValue);
+    if (!rate || rate <= 0) { setError('سعر الصرف يجب أن يكون رقماً أكبر من صفر'); return; }
+    await actions.addExchangeRate(currencyId, rate, rateNotes.trim() || null);
+    setRateFormFor(null); setRateValue(''); setRateNotes(''); setError('');
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-lg p-4" style={{ background: C.accentSoft, border: `1px solid ${C.accent}` }}>
+        <div className="font-bold" style={{ color: C.accentDark }}>العملة الأساسية: الريال اليمني (YER ﷼)</div>
+        <div className="text-xs mt-1" style={{ color: C.inkMuted }}>لا يمكن تغيير العملة الأساسية أو تعطيلها. كل التقارير والأرصدة الرئيسية تُحفظ وتُعرض بها.</div>
+      </div>
+
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="font-bold" style={{ color: C.ink }}>العملات الأجنبية</div>
+        {canManageCurrencies && <button onClick={() => setShowForm(!showForm)} className="px-3.5 py-2 rounded-lg text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>+ عملة جديدة</button>}
+      </div>
+
+      {showForm && canManageCurrencies && (
+        <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Field label="اسم العملة"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} placeholder="US Dollar" /></Field>
+            <Field label="الكود (ISO)"><input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} maxLength={3} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} placeholder="USD" /></Field>
+            <Field label="الرمز"><input value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} placeholder="$" /></Field>
+            <Field label="عدد الخانات العشرية"><input type="number" min="0" max="4" value={form.decimal_places} onChange={(e) => setForm({ ...form, decimal_places: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+          </div>
+          <ErrorNote>{error}</ErrorNote>
+          <button onClick={submit} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>حفظ العملة</button>
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {currencies.filter((c) => !c.is_base_currency).length === 0 && <EmptyState text="لا توجد عملات أجنبية مضافة بعد" />}
+        {currencies.filter((c) => !c.is_base_currency).map((c) => {
+          const current = currentRateFor(c.id);
+          return (
+            <div key={c.id} className="rounded-lg p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <div className="font-bold flex items-center gap-2" style={{ color: C.ink }}>
+                    {c.name} <span className="font-mono text-xs" style={{ color: C.inkMuted }}>({c.code} {c.symbol})</span>
+                    <Badge tone={c.status === 'active' ? 'normal' : 'muted'}>{c.status === 'active' ? 'نشطة' : 'معطّلة'}</Badge>
+                  </div>
+                  <div className="text-sm mt-1" style={{ color: C.inkMuted }}>
+                    السعر الحالي: {current ? <span className="font-mono font-bold" style={{ color: C.accent }}>1 {c.code} = {current.rate} ر.ي</span> : <span style={{ color: C.warning }}>لم يُحدَّد بعد</span>}
+                  </div>
+                </div>
+                {canManageRates && (
+                  <div className="flex gap-2">
+                    <button onClick={() => setRateFormFor(rateFormFor === c.id ? null : c.id)} className="text-xs font-bold px-3 py-1.5 rounded-md" style={{ border: `1px solid ${C.line}`, color: C.accent }}>تحديث السعر</button>
+                    {canManageCurrencies && <button onClick={() => askConfirm({ title: c.status === 'active' ? 'تعطيل عملة' : 'تفعيل عملة', message: `هل تريد ${c.status === 'active' ? 'تعطيل' : 'تفعيل'} ${c.name}؟`, onConfirm: () => actions.setCurrencyStatus(c.id, c.status === 'active' ? 'inactive' : 'active') })} className="text-xs font-bold px-3 py-1.5 rounded-md" style={{ border: `1px solid ${C.line}`, color: c.status === 'active' ? C.critical : C.normal }}>{c.status === 'active' ? 'تعطيل' : 'تفعيل'}</button>}
+                  </div>
+                )}
+              </div>
+
+              {rateFormFor === c.id && (
+                <div className="mt-3 pt-3 flex flex-wrap items-end gap-3" style={{ borderTop: `1px solid ${C.line}` }}>
+                  <Field label={`1 ${c.code} = ? ر.ي`}><input type="number" step="0.01" value={rateValue} onChange={(e) => setRateValue(e.target.value)} className="w-32 px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+                  <Field label="ملاحظة (اختياري)"><input value={rateNotes} onChange={(e) => setRateNotes(e.target.value)} className="w-48 px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+                  <button onClick={() => submitRate(c.id)} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>حفظ السعر</button>
+                </div>
+              )}
+              <ErrorNote>{error}</ErrorNote>
+
+              {historyFor(c.id).length > 0 && (
+                <details className="mt-3 text-xs">
+                  <summary className="cursor-pointer font-bold" style={{ color: C.inkMuted }}>تاريخ أسعار الصرف ({historyFor(c.id).length})</summary>
+                  <div className="mt-2 space-y-1">
+                    {historyFor(c.id).map((r) => (
+                      <div key={r.id} className="flex justify-between font-mono" style={{ color: C.inkMuted }}>
+                        <span>{fmtDateTime(r.effective_from)}{r.effective_to ? ' → ' + fmtDateTime(r.effective_to) : ' (حالي)'}</span>
+                        <span className="font-bold" style={{ color: C.ink }}>{r.rate} ر.ي</span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
