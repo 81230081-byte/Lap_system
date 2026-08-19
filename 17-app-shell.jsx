@@ -24,6 +24,7 @@ function AppShell({ session }) {
   const [expenses, setExpenses] = useState([]);
   const [fixedAssets, setFixedAssets] = useState([]);
   const [accountingPeriods, setAccountingPeriods] = useState([]);
+  const [bankReconciliations, setBankReconciliations] = useState([]);
   const [labSettings, setLabSettings] = useState(null);
   const [view, setView] = useState('dashboard');
   const [prevView, setPrevView] = useState(null);
@@ -130,18 +131,20 @@ function AppShell({ session }) {
   };
 
   const fetchCurrencies = async () => {
-    const [curRes, rateRes, expRes, faRes, apRes] = await Promise.all([
+    const [curRes, rateRes, expRes, faRes, apRes, brRes] = await Promise.all([
       sb.from('currencies').select('*').order('code'),
       sb.from('exchange_rates').select('*').order('effective_from', { ascending: false }),
       sb.from('expenses').select('*').order('created_at', { ascending: false }),
       sb.from('fixed_assets').select('*').order('created_at', { ascending: false }),
       sb.from('accounting_periods').select('*').order('start_date', { ascending: false }),
+      sb.from('bank_reconciliations').select('*').order('created_at', { ascending: false }),
     ]);
     if (curRes.data) setCurrencies(curRes.data);
     if (rateRes.data) setExchangeRates(rateRes.data);
     if (expRes.data) setExpenses(expRes.data);
     if (faRes.data) setFixedAssets(faRes.data);
     if (apRes.data) setAccountingPeriods(apRes.data);
+    if (brRes.data) setBankReconciliations(brRes.data);
   };
 
   useEffect(() => {
@@ -156,6 +159,7 @@ function AppShell({ session }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => fetchCurrencies())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'fixed_assets' }, () => fetchCurrencies())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_periods' }, () => fetchCurrencies())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bank_reconciliations' }, () => fetchCurrencies())
       .subscribe();
     return () => { sb.removeChannel(channel); sb.removeChannel(currencyChannel); };
   }, []);
@@ -473,6 +477,21 @@ function AppShell({ session }) {
       if (error) { notify('error', friendlyError(error)); throw error; }
       fetchCurrencies();
     },
+    startBankReconciliation: async (accountId, statementDate, statementBalance) => {
+      const { error } = await sb.rpc('start_bank_reconciliation', { p_account_id: accountId, p_statement_date: statementDate, p_statement_balance: statementBalance, p_user_name: displayName });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchCurrencies();
+    },
+    toggleTransactionReconciled: async (transactionId, reconciliationId, matched) => {
+      const { error } = await sb.rpc('toggle_transaction_reconciled', { p_transaction_id: transactionId, p_reconciliation_id: reconciliationId, p_matched: matched });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll();
+    },
+    completeBankReconciliation: async (reconciliationId, notes) => {
+      const { error } = await sb.rpc('complete_bank_reconciliation', { p_reconciliation_id: reconciliationId, p_notes: notes, p_user_name: displayName });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchCurrencies();
+    },
 
     updateStaffSalary: async (id, name, baseSalary) => {
       const { error } = await sb.from('profiles').update({ base_salary: baseSalary }).eq('id', id);
@@ -614,7 +633,7 @@ function AppShell({ session }) {
           {view === 'history' && <PatientHistoryView patient={historyPatient} orders={orders} catalog={catalog} setView={goTo} setActiveOrderId={setActiveOrderId} labSettings={labSettings} />}
           {view === 'inventory' && <InventoryView inventory={inventory} catalog={catalog} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} pendingAction={pendingAction} clearPendingAction={clearPendingAction} />}
           {view === 'suppliers' && <SuppliersView suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} labSettings={labSettings} />}
-          {view === 'treasury' && (isManager || can('view_treasury')) && <TreasuryView accounts={accounts} transactions={transactions} staff={staff} salaryPayments={salaryPayments} chartOfAccounts={chartOfAccounts} expenses={expenses} fixedAssets={fixedAssets} accountingPeriods={accountingPeriods} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
+          {view === 'treasury' && (isManager || can('view_treasury')) && <TreasuryView accounts={accounts} transactions={transactions} staff={staff} salaryPayments={salaryPayments} chartOfAccounts={chartOfAccounts} expenses={expenses} fixedAssets={fixedAssets} accountingPeriods={accountingPeriods} bankReconciliations={bankReconciliations} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
           {view === 'financial-reports' && (isManager || can('view_financial_reports')) && <FinancialReportsView accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} orders={orders} referringDoctors={referringDoctors} commissionPayments={commissionPayments} patients={patients} suppliers={suppliers} chartOfAccounts={chartOfAccounts} journalLines={journalLines} catalog={catalog} staff={staff} testConsumables={testConsumables} inventory={inventory} actions={actions} />}
           {view === 'billing' && <BillingView invoices={invoices} orders={orders} patients={patients} accounts={accounts} actions={actions} />}
           {view === 'audit' && <AuditLogView auditLog={auditLog} />}
