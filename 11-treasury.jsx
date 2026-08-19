@@ -265,16 +265,18 @@ function PayrollTab({ staff, accounts, salaryPayments, actions }) {
   );
 }
 
-function TreasuryView({ accounts, transactions, staff, salaryPayments, chartOfAccounts, expenses, fixedAssets, accountingPeriods, actions, askConfirm, isManager, can }) {
+function TreasuryView({ accounts, transactions, staff, salaryPayments, chartOfAccounts, expenses, fixedAssets, accountingPeriods, bankReconciliations, actions, askConfirm, isManager, can }) {
   const [tab, setTab] = useState('accounts');
   const canExpenses = isManager || (can && can('manage_expenses'));
   const canAssets = isManager || (can && can('manage_fixed_assets'));
   const canPeriods = isManager || (can && can('close_accounting_period'));
+  const canReconcile = isManager || (can && can('perform_bank_reconciliation'));
   const TABS = [
     ['accounts', 'الحسابات'],
     ['payroll', 'الرواتب'],
     ...(canExpenses ? [['expenses', 'المصروفات']] : []),
     ...(canAssets ? [['assets', 'الأصول الثابتة']] : []),
+    ...(canReconcile ? [['reconciliation', 'التسوية البنكية']] : []),
     ...(canPeriods ? [['periods', 'الفترات المحاسبية']] : []),
   ];
   return (
@@ -291,6 +293,7 @@ function TreasuryView({ accounts, transactions, staff, salaryPayments, chartOfAc
       {tab === 'payroll' && <PayrollTab staff={staff} accounts={accounts} salaryPayments={salaryPayments} actions={actions} />}
       {tab === 'expenses' && canExpenses && <ExpensesTab expenses={expenses} accounts={accounts} chartOfAccounts={chartOfAccounts} actions={actions} />}
       {tab === 'assets' && canAssets && <FixedAssetsTab fixedAssets={fixedAssets} accounts={accounts} chartOfAccounts={chartOfAccounts} actions={actions} askConfirm={askConfirm} />}
+      {tab === 'reconciliation' && canReconcile && <ReconciliationTab accounts={accounts} transactions={transactions} bankReconciliations={bankReconciliations} actions={actions} askConfirm={askConfirm} />}
       {tab === 'periods' && canPeriods && <AccountingPeriodsTab accountingPeriods={accountingPeriods} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
     </div>
   );
@@ -519,6 +522,119 @@ function AccountingPeriodsTab({ accountingPeriods, actions, askConfirm, isManage
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// التسوية البنكية: بدء جلسة تسوية بمقارنة رصيد كشف الحساب مقابل حركات النظام،
+// وضع علامة تحقق على كل حركة، ثم إغلاق الجلسة وعرض الفرق (إن وجد)
+// ---------------------------------------------------------------------------
+function ReconciliationTab({ accounts, transactions, bankReconciliations, actions, askConfirm }) {
+  const [accountId, setAccountId] = useState(accounts[0]?.id || '');
+  const [statementDate, setStatementDate] = useState(new Date().toISOString().slice(0, 10));
+  const [statementBalance, setStatementBalance] = useState('');
+  const [error, setError] = useState('');
+  const [notes, setNotes] = useState('');
+
+  const activeRec = bankReconciliations.find((r) => r.account_id === accountId && r.status === 'in_progress');
+  const pastRecs = bankReconciliations.filter((r) => r.account_id === accountId && r.status === 'completed').sort((a, b) => new Date(b.completed_at) - new Date(a.completed_at));
+
+  const relevantTx = activeRec
+    ? transactions.filter((t) => t.account_id === accountId && t.created_at.slice(0, 10) <= activeRec.statement_date).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    : [];
+
+  const start = async () => {
+    const bal = Number(statementBalance);
+    if (isNaN(bal)) { setError('أدخل رصيد كشف الحساب'); return; }
+    setError('');
+    await actions.startBankReconciliation(accountId, statementDate, bal);
+  };
+
+  const complete = () => {
+    askConfirm({
+      title: 'إكمال التسوية البنكية',
+      message: 'سيتم حساب رصيد الدفاتر حتى تاريخ الكشف ومقارنته برصيد الكشف. لا يمكن التراجع عن هذا الإجراء.',
+      confirmLabel: 'إكمال التسوية',
+      onConfirm: () => actions.completeBankReconciliation(activeRec.id, notes.trim() || null),
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <Field label="الحساب">
+          <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </Field>
+
+        {!activeRec ? (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Field label="تاريخ كشف الحساب"><input type="date" value={statementDate} onChange={(e) => setStatementDate(e.target.value)} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+              <Field label="رصيد كشف الحساب"><input type="number" value={statementBalance} onChange={(e) => setStatementBalance(e.target.value)} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+            </div>
+            <ErrorNote>{error}</ErrorNote>
+            <button onClick={start} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>بدء تسوية جديدة</button>
+          </>
+        ) : (
+          <>
+            <div className="rounded-lg px-4 py-3 text-sm font-bold" style={{ background: C.accentSoft, color: C.accentDark }}>
+              جلسة تسوية جارية — حتى {fmtDate(activeRec.statement_date)} — رصيد الكشف: {SAR(activeRec.statement_balance)}
+            </div>
+            <div className="rounded-lg overflow-x-auto" style={{ border: `1px solid ${C.line}` }}>
+              <table className="w-full text-sm">
+                <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <th className="text-right px-3 py-2 font-bold" style={{ color: C.inkMuted }}>التاريخ</th>
+                  <th className="text-right px-3 py-2 font-bold" style={{ color: C.inkMuted }}>الوصف</th>
+                  <th className="text-right px-3 py-2 font-bold" style={{ color: C.inkMuted }}>المبلغ</th>
+                  <th className="text-right px-3 py-2 font-bold" style={{ color: C.inkMuted }}>مطابق للكشف</th>
+                </tr></thead>
+                <tbody>
+                  {relevantTx.length === 0 && <tr><td colSpan={4}><EmptyState text="لا توجد حركات" /></td></tr>}
+                  {relevantTx.map((t) => (
+                    <tr key={t.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                      <td className="px-3 py-2 font-mono text-xs" style={{ color: C.inkMuted }}>{fmtDate(t.created_at)}</td>
+                      <td className="px-3 py-2" style={{ color: C.ink }}>{t.description || t.category}</td>
+                      <td className="px-3 py-2 font-mono font-bold" style={{ color: t.direction === 'in' ? C.normal : C.critical }}>{t.direction === 'in' ? '+' : '-'}{SAR(t.amount)}</td>
+                      <td className="px-3 py-2">
+                        <input type="checkbox" checked={t.reconciled} onChange={(e) => actions.toggleTransactionReconciled(t.id, activeRec.id, e.target.checked)} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Field label="ملاحظات (اختياري)"><input value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} placeholder="مثال: شيك لسه ما انصرف" /></Field>
+            <button onClick={complete} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.critical, color: '#fff' }}>إكمال التسوية</button>
+          </>
+        )}
+      </div>
+
+      {pastRecs.length > 0 && (
+        <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="px-4 py-3 font-bold" style={{ color: C.ink, borderBottom: `1px solid ${C.line}` }}>سجل التسويات السابقة</div>
+          <table className="w-full text-sm">
+            <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+              <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>تاريخ الكشف</th>
+              <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>رصيد الكشف</th>
+              <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>رصيد الدفاتر</th>
+              <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الفرق</th>
+            </tr></thead>
+            <tbody>
+              {pastRecs.map((r) => (
+                <tr key={r.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <td className="px-4 py-3 font-mono" style={{ color: C.inkMuted }}>{fmtDate(r.statement_date)}</td>
+                  <td className="px-4 py-3 font-mono" style={{ color: C.ink }}>{SAR(r.statement_balance)}</td>
+                  <td className="px-4 py-3 font-mono" style={{ color: C.ink }}>{SAR(r.book_balance)}</td>
+                  <td className="px-4 py-3 font-mono font-bold" style={{ color: Math.abs(r.difference) < 0.01 ? C.normal : C.critical }}>{SAR(r.difference)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
