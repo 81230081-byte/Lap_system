@@ -1,8 +1,9 @@
 // الفواتير والدفعات
 
-function BillingView({ invoices, orders, patients, accounts, actions }) {
+function BillingView({ invoices, orders, patients, accounts, currencies, actions }) {
   const [expandedId, setExpandedId] = useState(null);
-  const [payForm, setPayForm] = useState({ amount: '', method: 'نقدي', accountId: accounts[0]?.id || '' });
+  const foreignCurrencies = currencies.filter((c) => !c.is_base_currency && c.status === 'active');
+  const [payForm, setPayForm] = useState({ amount: '', method: 'نقدي', accountId: accounts[0]?.id || '', currencyId: '' });
   const [error, setError] = useState('');
   const collected = invoices.reduce((s, i) => s + invoicePaid(i), 0);
   const pending = invoices.reduce((s, i) => s + Math.max(0, i.amount - invoicePaid(i)), 0);
@@ -22,14 +23,21 @@ function BillingView({ invoices, orders, patients, accounts, actions }) {
     .map(([pid, total]) => ({ patient: patients.find((p) => p.id === pid), total }))
     .sort((a, b) => b.total - a.total);
 
-  const openPay = (inv) => { setExpandedId(inv.id === expandedId ? null : inv.id); setPayForm({ amount: '', method: 'نقدي', accountId: accounts[0]?.id || '' }); setError(''); };
+  const openPay = (inv) => { setExpandedId(inv.id === expandedId ? null : inv.id); setPayForm({ amount: '', method: 'نقدي', accountId: accounts[0]?.id || '', currencyId: '' }); setError(''); };
   const submitPayment = async (inv) => {
     const amount = Number(payForm.amount);
     const remaining = inv.amount - invoicePaid(inv);
     if (isNaN(amount) || amount <= 0) { setError('أدخل مبلغاً صحيحاً أكبر من صفر'); return; }
-    if (amount > remaining) { setError(`المبلغ أكبر من المتبقي (${SAR(remaining)})`); return; }
     if (!payForm.accountId) { setError('اختر الصندوق أو الحساب البنكي المستلم'); return; }
-    await actions.addPayment(inv.id, amount, payForm.method, payForm.accountId);
+    if (payForm.currencyId) {
+      // Foreign currency: `amount` is the amount actually received in that
+      // currency; the YER equivalent is computed server-side from the current
+      // exchange rate, so no client-side conversion or extra validation here.
+      await actions.addPayment(inv.id, null, payForm.method, payForm.accountId, payForm.currencyId, amount);
+    } else {
+      if (amount > remaining) { setError(`المبلغ أكبر من المتبقي (${SAR(remaining)})`); return; }
+      await actions.addPayment(inv.id, amount, payForm.method, payForm.accountId);
+    }
     setExpandedId(null); setError('');
   };
 
@@ -84,7 +92,13 @@ function BillingView({ invoices, orders, patients, accounts, actions }) {
                     <tr style={{ background: C.bg }}>
                       <td colSpan={5} className="px-4 py-3">
                         <div className="flex flex-wrap items-end gap-3">
-                          <Field label="المبلغ"><input type="number" min="0" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} className="w-32 px-3 py-2 rounded-md text-sm font-mono" style={{ ...inputStyle, background: C.surface }} /></Field>
+                          <Field label="العملة">
+                            <select value={payForm.currencyId} onChange={(e) => setPayForm({ ...payForm, currencyId: e.target.value })} className="px-3 py-2 rounded-md text-sm" style={{ ...inputStyle, background: C.surface }}>
+                              <option value="">ريال يمني (YER)</option>
+                              {foreignCurrencies.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
+                            </select>
+                          </Field>
+                          <Field label={payForm.currencyId ? 'المبلغ المستلم بالعملة' : 'المبلغ (ر.ي)'}><input type="number" min="0" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} className="w-32 px-3 py-2 rounded-md text-sm font-mono" style={{ ...inputStyle, background: C.surface }} /></Field>
                           <Field label="طريقة الدفع"><select value={payForm.method} onChange={(e) => setPayForm({ ...payForm, method: e.target.value })} className="px-3 py-2 rounded-md text-sm" style={{ ...inputStyle, background: C.surface }}><option>نقدي</option><option>بطاقة</option><option>تحويل بنكي</option><option>تأمين طبي</option></select></Field>
                           <Field label="الصندوق/الحساب المستلم"><select value={payForm.accountId} onChange={(e) => setPayForm({ ...payForm, accountId: e.target.value })} className="px-3 py-2 rounded-md text-sm" style={{ ...inputStyle, background: C.surface }}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
                           <button onClick={() => submitPayment(inv)} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>تأكيد</button>
