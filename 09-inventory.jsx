@@ -12,7 +12,13 @@ function InventoryView({ inventory, catalog, actions, askConfirm, isManager, can
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ name: '', unit: '', quantity: '', threshold: '', expiry: '' });
   const [error, setError] = useState('');
-  const { page, setPage, totalPages, pageItems } = usePagination(inventory, 6);
+  const [query, setQuery] = useState('');
+  const filtered = inventory.filter((i) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return (i.name || '').toLowerCase().includes(q) || (i.code || '').toLowerCase().includes(q);
+  });
+  const { page, setPage, totalPages, pageItems } = usePagination(filtered, 6, query);
 
   const resetForm = () => { setForm({ name: '', unit: '', quantity: '', threshold: '', expiry: '' }); setEditingId(null); setShowForm(false); setError(''); };
   const startEdit = (item) => { setEditingId(item.id); setForm({ name: item.name, unit: item.unit, quantity: String(item.quantity), threshold: String(item.threshold), expiry: item.expiry_date || '' }); setShowForm(true); setError(''); };
@@ -56,6 +62,7 @@ function InventoryView({ inventory, catalog, actions, askConfirm, isManager, can
         </div>
       )}
       {!showForm && <ErrorNote>{error}</ErrorNote>}
+      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="بحث باسم الصنف أو الكود..." className="w-full px-3 py-2.5 rounded-lg text-sm" style={{ ...inputStyle, background: C.surface }} />
       <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <table className="w-full text-sm">
           <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
@@ -66,6 +73,7 @@ function InventoryView({ inventory, catalog, actions, askConfirm, isManager, can
             <th></th>
           </tr></thead>
           <tbody>
+            {pageItems.length === 0 && <tr><td colSpan={5}><EmptyState text="لا توجد أصناف مطابقة" /></td></tr>}
             {pageItems.map((item) => {
               const low = item.quantity <= item.threshold;
               const exp = expiryStatus(item.expiry_date);
