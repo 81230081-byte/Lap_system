@@ -422,6 +422,13 @@ function ChartOfAccountsTab({ chartOfAccounts, actions }) {
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+
+  const matches = (a) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return (a.code || '').toLowerCase().includes(q) || (a.name_ar || '').toLowerCase().includes(q) || (a.name_en || '').toLowerCase().includes(q);
+  };
 
   const resetForm = () => { setForm(blank); setEditingId(null); setError(''); };
   const startEdit = (a) => { setEditingId(a.id); setForm({ code: a.code, name_ar: a.name_ar, name_en: a.name_en || '', type: a.type, parent_id: a.parent_id || '' }); setError(''); };
@@ -437,8 +444,8 @@ function ChartOfAccountsTab({ chartOfAccounts, actions }) {
     actions.deleteCoaAccount(a.id, a.name_ar);
   };
 
-  const roots = chartOfAccounts.filter((a) => !a.parent_id).sort((x, y) => x.code.localeCompare(y.code));
   const childrenOf = (id) => chartOfAccounts.filter((a) => a.parent_id === id).sort((x, y) => x.code.localeCompare(y.code));
+  const roots = chartOfAccounts.filter((a) => !a.parent_id && (matches(a) || childrenOf(a.id).some(matches))).sort((x, y) => x.code.localeCompare(y.code));
 
   return (
     <div className="space-y-4">
@@ -466,6 +473,7 @@ function ChartOfAccountsTab({ chartOfAccounts, actions }) {
         </div>
       </div>
 
+      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="بحث بالرمز أو الاسم..." className="w-full px-3 py-2.5 rounded-lg text-sm" style={{ ...inputStyle, background: C.surface }} />
       <div className="rounded-lg overflow-hidden" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <table className="w-full text-sm">
           <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
@@ -483,7 +491,7 @@ function ChartOfAccountsTab({ chartOfAccounts, actions }) {
                   <td className="px-4 py-2.5"><Badge tone="accent">{COA_TYPE_LABEL[root.type]}</Badge></td>
                   <td className="px-4 py-2.5 whitespace-nowrap"><div className="flex items-center gap-3"><button onClick={() => startEdit(root)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button><button onClick={() => onDelete(root)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button></div></td>
                 </tr>
-                {childrenOf(root.id).map((child) => (
+                {childrenOf(root.id).filter((c) => !query.trim() || matches(root) || matches(c)).map((child) => (
                   <tr key={child.id} style={{ borderBottom: `1px solid ${C.line}` }}>
                     <td className="px-4 py-2.5 font-mono pr-8" style={{ color: C.inkMuted }}>{child.code}</td>
                     <td className="px-4 py-2.5 pr-8" style={{ color: C.ink }}>↳ {child.name_ar}{child.name_en ? <span className="text-xs" style={{ color: C.inkMuted }}> — {child.name_en}</span> : ''}</td>
