@@ -8,6 +8,8 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, 
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
 
   const resetForm = () => { setForm(blank); setEditingId(null); setError(''); };
   const startEdit = (t) => {
@@ -119,6 +121,13 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, 
           {editingId && <button onClick={resetForm} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>إلغاء</button>}
         </div>
       </div>}
+      <div className="flex items-center gap-3 flex-wrap">
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="بحث بالاسم أو الاسم المختصر أو الكود..." className="flex-1 min-w-[220px] px-3 py-2.5 rounded-lg text-sm" style={{ ...inputStyle, background: C.surface }} />
+        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="px-3 py-2.5 rounded-lg text-sm" style={{ ...inputStyle, background: C.surface }}>
+          <option value="all">كل الأقسام</option>
+          {existingCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
       <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <table className="w-full text-sm">
           <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
@@ -128,7 +137,15 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, 
             <th></th>
           </tr></thead>
           <tbody>
-            {groupByCategory(catalog).map(([cat, tests]) => (
+            {(() => {
+              const q = query.trim().toLowerCase();
+              const filtered = catalog.filter((c) => {
+                if (categoryFilter !== 'all' && c.category !== categoryFilter) return false;
+                if (!q) return true;
+                return (c.name || '').toLowerCase().includes(q) || (c.short_name || '').toLowerCase().includes(q) || (c.code || '').toLowerCase().includes(q);
+              });
+              if (filtered.length === 0) return <tr><td colSpan={4}><EmptyState text="لا توجد فحوصات مطابقة" /></td></tr>;
+              return groupByCategory(filtered).map(([cat, tests]) => (
               <React.Fragment key={cat}>
                 <tr style={{ background: C.bg }}><td colSpan={4} className="px-4 py-2 text-xs font-bold" style={{ color: C.accentDark }}>{cat} <span style={{ color: C.inkMuted, fontWeight: 400 }}>({tests.length})</span></td></tr>
                 {tests.map((c) => (
@@ -144,7 +161,8 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, 
                   </tr>
                 ))}
               </React.Fragment>
-            ))}
+              ));
+            })()}
           </tbody>
         </table>
       </div>
