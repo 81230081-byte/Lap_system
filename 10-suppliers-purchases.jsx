@@ -36,7 +36,13 @@ function SuppliersTab({ suppliers, purchases, actions, askConfirm, isManager, ca
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ name: '', phone: '', notes: '' });
   const [error, setError] = useState('');
-  const { page, setPage, totalPages, pageItems } = usePagination(suppliers, 6);
+  const [query, setQuery] = useState('');
+  const filteredSuppliers = suppliers.filter((s) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return (s.name || '').toLowerCase().includes(q) || (s.phone || '').includes(q);
+  });
+  const { page, setPage, totalPages, pageItems } = usePagination(filteredSuppliers, 6, query);
 
   const resetForm = () => { setForm({ name: '', phone: '', notes: '' }); setEditingId(null); setShowForm(false); setError(''); };
   const startEdit = (s) => { setEditingId(s.id); setForm({ name: s.name, phone: s.phone || '', notes: s.notes || '' }); setShowForm(true); setError(''); };
@@ -78,6 +84,7 @@ function SuppliersTab({ suppliers, purchases, actions, askConfirm, isManager, ca
         </div>
       )}
       {!showForm && <ErrorNote>{error}</ErrorNote>}
+      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="بحث باسم المورد أو الهاتف..." className="w-full px-3 py-2.5 rounded-lg text-sm" style={{ ...inputStyle, background: C.surface }} />
       <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
         <table className="w-full text-sm">
           <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
@@ -106,7 +113,7 @@ function SuppliersTab({ suppliers, purchases, actions, askConfirm, isManager, ca
                 </tr>
               );
             })}
-            {pageItems.length === 0 && <tr><td colSpan={4}><EmptyState text="لا يوجد موردون مسجلون" /></td></tr>}
+            {pageItems.length === 0 && <tr><td colSpan={4}><EmptyState text={query ? 'لا يوجد موردون مطابقون' : 'لا يوجد موردون مسجلون'} /></td></tr>}
           </tbody>
         </table>
         <PaginationBar page={page} totalPages={totalPages} setPage={setPage} />
