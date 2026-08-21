@@ -25,6 +25,7 @@ function AppShell({ session }) {
   const [fixedAssets, setFixedAssets] = useState([]);
   const [accountingPeriods, setAccountingPeriods] = useState([]);
   const [bankReconciliations, setBankReconciliations] = useState([]);
+  const [dailyClosings, setDailyClosings] = useState([]);
   const [labSettings, setLabSettings] = useState(null);
   const [view, setView] = useState('dashboard');
   const [prevView, setPrevView] = useState(null);
@@ -131,13 +132,14 @@ function AppShell({ session }) {
   };
 
   const fetchCurrencies = async () => {
-    const [curRes, rateRes, expRes, faRes, apRes, brRes] = await Promise.all([
+    const [curRes, rateRes, expRes, faRes, apRes, brRes, dcRes] = await Promise.all([
       sb.from('currencies').select('*').order('code'),
       sb.from('exchange_rates').select('*').order('effective_from', { ascending: false }),
       sb.from('expenses').select('*').order('created_at', { ascending: false }),
       sb.from('fixed_assets').select('*').order('created_at', { ascending: false }),
       sb.from('accounting_periods').select('*').order('start_date', { ascending: false }),
       sb.from('bank_reconciliations').select('*').order('created_at', { ascending: false }),
+      sb.from('daily_closings').select('*').order('closed_at', { ascending: false }),
     ]);
     if (curRes.data) setCurrencies(curRes.data);
     if (rateRes.data) setExchangeRates(rateRes.data);
@@ -145,6 +147,7 @@ function AppShell({ session }) {
     if (faRes.data) setFixedAssets(faRes.data);
     if (apRes.data) setAccountingPeriods(apRes.data);
     if (brRes.data) setBankReconciliations(brRes.data);
+    if (dcRes.data) setDailyClosings(dcRes.data);
   };
 
   useEffect(() => {
@@ -160,6 +163,7 @@ function AppShell({ session }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'fixed_assets' }, () => fetchCurrencies())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'accounting_periods' }, () => fetchCurrencies())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bank_reconciliations' }, () => fetchCurrencies())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_closings' }, () => fetchCurrencies())
       .subscribe();
     return () => { sb.removeChannel(channel); sb.removeChannel(currencyChannel); };
   }, []);
@@ -376,10 +380,15 @@ function AppShell({ session }) {
       await sb.rpc('log_action', { p_user_name: displayName, p_action: 'حذف حساب من الشجرة المحاسبية', p_details: name });
       fetchAccountsAndCoa();
     },
-    addManualTransaction: async (accountId, direction, amount, category, description, coaId) => {
-      const { error } = await sb.rpc('add_manual_transaction', { p_account_id: accountId, p_direction: direction, p_amount: amount, p_category: category, p_description: description || null, p_user_name: displayName, p_coa_id: coaId || null });
+    addManualTransaction: async (accountId, direction, amount, category, description, coaId, partyName) => {
+      const { error } = await sb.rpc('add_manual_transaction', { p_account_id: accountId, p_direction: direction, p_amount: amount, p_category: category, p_description: description || null, p_user_name: displayName, p_coa_id: coaId || null, p_party_name: partyName || null });
       if (error) { notify('error', friendlyError(error)); throw error; }
       fetchAll();
+    },
+    closeDailyRegister: async (accountId, countedBalance, treasuryAccountId, notes) => {
+      const { error } = await sb.rpc('close_daily_register', { p_account_id: accountId, p_counted_balance: countedBalance, p_treasury_account_id: treasuryAccountId, p_notes: notes, p_user_name: displayName });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll(); fetchCurrencies();
     },
 
     updateStaffRole: async (id, name, newRole) => {
@@ -633,7 +642,7 @@ function AppShell({ session }) {
           {view === 'history' && <PatientHistoryView patient={historyPatient} orders={orders} catalog={catalog} setView={goTo} setActiveOrderId={setActiveOrderId} labSettings={labSettings} />}
           {view === 'inventory' && <InventoryView inventory={inventory} catalog={catalog} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} pendingAction={pendingAction} clearPendingAction={clearPendingAction} />}
           {view === 'suppliers' && (isManager || can('manage_suppliers') || can('manage_purchases')) && <SuppliersView suppliers={suppliers} purchases={purchases} inventory={inventory} accounts={accounts} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} labSettings={labSettings} />}
-          {view === 'treasury' && (isManager || can('view_treasury')) && <TreasuryView accounts={accounts} transactions={transactions} staff={staff} salaryPayments={salaryPayments} chartOfAccounts={chartOfAccounts} expenses={expenses} fixedAssets={fixedAssets} accountingPeriods={accountingPeriods} bankReconciliations={bankReconciliations} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
+          {view === 'treasury' && (isManager || can('view_treasury')) && <TreasuryView accounts={accounts} transactions={transactions} staff={staff} salaryPayments={salaryPayments} chartOfAccounts={chartOfAccounts} expenses={expenses} fixedAssets={fixedAssets} accountingPeriods={accountingPeriods} bankReconciliations={bankReconciliations} dailyClosings={dailyClosings} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
           {view === 'financial-reports' && (isManager || can('view_financial_reports')) && <FinancialReportsView accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} orders={orders} referringDoctors={referringDoctors} commissionPayments={commissionPayments} patients={patients} suppliers={suppliers} chartOfAccounts={chartOfAccounts} journalLines={journalLines} catalog={catalog} staff={staff} testConsumables={testConsumables} inventory={inventory} actions={actions} />}
           {view === 'billing' && (isManager || can('view_invoices') || can('record_payments')) && <BillingView invoices={invoices} orders={orders} patients={patients} accounts={accounts} currencies={currencies} actions={actions} />}
           {view === 'audit' && (isManager || can('view_financial_reports') || can('view_audit_log')) && <AuditLogView auditLog={auditLog} />}
