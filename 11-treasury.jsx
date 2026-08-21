@@ -18,7 +18,8 @@ function AccountsTab({ accounts, transactions, chartOfAccounts, actions, askConf
   const [accForm, setAccForm] = useState({ name: '', type: 'نقدي', bankName: '', accountNumber: '', openingBalance: '' });
   const [error, setError] = useState('');
   const [expandedAccountId, setExpandedAccountId] = useState(null);
-  const [txForm, setTxForm] = useState({ direction: 'in', amount: '', category: '', description: '', coaId: '' });
+  const [txForm, setTxForm] = useState({ direction: 'in', amount: '', category: '', description: '', coaId: '', partyName: '' });
+  const [printingVoucher, setPrintingVoucher] = useState(null);
   const postableCoa = chartOfAccounts.filter((a) => a.type === 'revenue' || a.type === 'expense');
 
   const cashTotal = accounts.filter((a) => a.type === 'نقدي').reduce((s, a) => s + accountBalance(a, transactions), 0);
@@ -46,13 +47,14 @@ function AccountsTab({ accounts, transactions, chartOfAccounts, actions, askConf
     askConfirm({ title: 'حذف حساب', message: `هل تريد حذف "${a.name}"؟`, danger: true, onConfirm: () => actions.deleteAccount(a.id, a.name) });
   };
 
-  const openTx = (a) => { setExpandedAccountId(a.id === expandedAccountId ? null : a.id); setTxForm({ direction: 'in', amount: '', category: '', description: '', coaId: '' }); setError(''); };
+  const openTx = (a) => { setExpandedAccountId(a.id === expandedAccountId ? null : a.id); setTxForm({ direction: 'in', amount: '', category: '', description: '', coaId: '', partyName: '' }); setError(''); };
   const submitTx = async (a) => {
     const amount = Number(txForm.amount);
     if (isNaN(amount) || amount <= 0) { setError('أدخل مبلغاً صحيحاً أكبر من صفر'); return; }
+    if (!txForm.partyName.trim()) { setError(txForm.direction === 'in' ? 'اسم الدافع مطلوب' : 'اسم المستلم مطلوب'); return; }
     if (!txForm.category.trim()) { setError('أدخل تصنيف الحركة (مثلاً: إيجار، رواتب، إيداع رأس مال)'); return; }
     if (!txForm.coaId) { setError('اختر الحساب من الشجرة المحاسبية (إيرادات أو مصروفات)'); return; }
-    await actions.addManualTransaction(a.id, txForm.direction, amount, txForm.category.trim(), txForm.description.trim(), txForm.coaId);
+    await actions.addManualTransaction(a.id, txForm.direction, amount, txForm.category.trim(), txForm.description.trim(), txForm.coaId, txForm.partyName.trim());
     setExpandedAccountId(null); setError('');
   };
 
@@ -107,7 +109,7 @@ function AccountsTab({ accounts, transactions, chartOfAccounts, actions, askConf
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="font-mono font-bold text-base" style={{ color: C.ink }}>{SAR(bal)}</div>
-                  <button onClick={() => openTx(a)} className="text-xs font-bold" style={{ color: C.accent }}>قيد يدوي</button>
+                  <button onClick={() => openTx(a)} className="text-xs font-bold" style={{ color: C.accent }}>سند قبض / صرف</button>
                   {isManager && <button onClick={() => startEdit(a)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button>}
                   {isManager && <button onClick={() => onDeleteAccount(a)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button>}
                 </div>
@@ -115,13 +117,14 @@ function AccountsTab({ accounts, transactions, chartOfAccounts, actions, askConf
 
               {expandedAccountId === a.id && (
                 <div className="mt-3 pt-3 space-y-3" style={{ borderTop: `1px solid ${C.line}` }}>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 items-end">
-                    <Field label="النوع">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2 items-end">
+                    <Field label="نوع السند">
                       <select value={txForm.direction} onChange={(e) => setTxForm({ ...txForm, direction: e.target.value, coaId: '' })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
-                        <option value="in">إيداع (دخل)</option>
-                        <option value="out">مصروف (خرج)</option>
+                        <option value="in">سند قبض (دخل)</option>
+                        <option value="out">سند صرف (خرج)</option>
                       </select>
                     </Field>
+                    <Field label={txForm.direction === 'in' ? 'اسم الدافع' : 'اسم المستلم'}><input value={txForm.partyName} onChange={(e) => setTxForm({ ...txForm, partyName: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
                     <Field label="المبلغ"><input type="number" min="0" value={txForm.amount} onChange={(e) => setTxForm({ ...txForm, amount: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
                     <Field label="التصنيف">
                       <input list="tx-categories-list" value={txForm.category} onChange={(e) => setTxForm({ ...txForm, category: e.target.value })} placeholder="إيجار، رواتب..." className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} />
@@ -136,7 +139,7 @@ function AccountsTab({ accounts, transactions, chartOfAccounts, actions, askConf
                     <Field label="ملاحظات (اختياري)"><input value={txForm.description} onChange={(e) => setTxForm({ ...txForm, description: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={() => submitTx(a)} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>حفظ القيد</button>
+                    <button onClick={() => submitTx(a)} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>حفظ السند</button>
                     <button onClick={() => setExpandedAccountId(null)} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>إلغاء</button>
                   </div>
                   {accTx.length > 0 && (
@@ -144,8 +147,14 @@ function AccountsTab({ accounts, transactions, chartOfAccounts, actions, askConf
                       <div className="font-bold" style={{ color: C.ink }}>آخر الحركات</div>
                       {accTx.map((t) => (
                         <div key={t.id} className="flex items-center justify-between">
-                          <span>{fmtDate(t.created_at)} · {t.category}{t.description ? ' — ' + t.description : ''}</span>
-                          <span className="font-mono font-bold" style={{ color: t.direction === 'in' ? C.normal : C.critical }}>{t.direction === 'in' ? '+' : '-'}{SAR(t.amount)}</span>
+                          <span>
+                            {t.voucher_number && <span className="font-mono font-bold" style={{ color: C.accent }}>{t.voucher_number}</span>}
+                            {' '}{fmtDate(t.created_at)} · {t.category}{t.party_name ? ' — ' + t.party_name : ''}{t.description ? ' — ' + t.description : ''}
+                          </span>
+                          <span className="flex items-center gap-2">
+                            <span className="font-mono font-bold" style={{ color: t.direction === 'in' ? C.normal : C.critical }}>{t.direction === 'in' ? '+' : '-'}{SAR(t.amount)}</span>
+                            {t.voucher_number && <button onClick={() => setPrintingVoucher(t)} className="text-xs font-bold" style={{ color: C.accent }}>طباعة</button>}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -156,6 +165,42 @@ function AccountsTab({ accounts, transactions, chartOfAccounts, actions, askConf
           );
         })}
         {accounts.length === 0 && <EmptyState text="لا توجد صناديق أو حسابات مسجلة بعد" />}
+      </div>
+      <VoucherPrintDialog transaction={printingVoucher} account={accounts.find((a) => a.id === printingVoucher?.account_id)} onClose={() => setPrintingVoucher(null)} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// طباعة سند القبض/الصرف
+// ---------------------------------------------------------------------------
+function VoucherPrintDialog({ transaction, account, onClose }) {
+  if (!transaction) return null;
+  const isReceipt = transaction.direction === 'in';
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 no-print" style={{ background: 'rgba(28,38,34,0.45)' }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-lg p-6" style={{ background: '#fff' }} onClick={(e) => e.stopPropagation()}>
+        <div id="voucher-print-area">
+          <div className="text-center mb-4">
+            <div className="text-lg font-bold" style={{ color: isReceipt ? C.normal : C.critical }}>{isReceipt ? 'سند قبض' : 'سند صرف'}</div>
+            <div className="text-xs font-mono" style={{ color: C.inkMuted }}>{transaction.voucher_number}</div>
+          </div>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between py-1.5" style={{ borderBottom: `1px solid ${C.line}` }}><span style={{ color: C.inkMuted }}>التاريخ</span><span className="font-mono font-bold">{fmtDateTime(transaction.created_at)}</span></div>
+            <div className="flex justify-between py-1.5" style={{ borderBottom: `1px solid ${C.line}` }}><span style={{ color: C.inkMuted }}>{isReceipt ? 'استلمنا من السيد/ة' : 'صرفنا إلى السيد/ة'}</span><span className="font-bold">{transaction.party_name || '—'}</span></div>
+            <div className="flex justify-between py-1.5" style={{ borderBottom: `1px solid ${C.line}` }}><span style={{ color: C.inkMuted }}>مبلغاً وقدره</span><span className="font-mono font-bold text-base">{SAR(transaction.amount)}</span></div>
+            <div className="flex justify-between py-1.5" style={{ borderBottom: `1px solid ${C.line}` }}><span style={{ color: C.inkMuted }}>وذلك مقابل</span><span className="font-bold">{transaction.category}{transaction.description ? ' — ' + transaction.description : ''}</span></div>
+            <div className="flex justify-between py-1.5" style={{ borderBottom: `1px solid ${C.line}` }}><span style={{ color: C.inkMuted }}>{isReceipt ? 'في حساب' : 'من حساب'}</span><span className="font-bold">{account?.name || '—'}</span></div>
+          </div>
+          <div className="grid grid-cols-2 gap-4 mt-8 pt-4 text-xs text-center" style={{ borderTop: `1px solid ${C.line}` }}>
+            <div>توقيع المستلم<div className="mt-6" style={{ borderTop: `1px solid ${C.line}` }}></div></div>
+            <div>توقيع المحاسب<div className="mt-6" style={{ borderTop: `1px solid ${C.line}` }}></div></div>
+          </div>
+        </div>
+        <div className="flex gap-2 mt-5 no-print">
+          <button onClick={() => window.print()} className="flex-1 px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>طباعة</button>
+          <button onClick={onClose} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>إغلاق</button>
+        </div>
       </div>
     </div>
   );
@@ -265,18 +310,20 @@ function PayrollTab({ staff, accounts, salaryPayments, actions }) {
   );
 }
 
-function TreasuryView({ accounts, transactions, staff, salaryPayments, chartOfAccounts, expenses, fixedAssets, accountingPeriods, bankReconciliations, actions, askConfirm, isManager, can }) {
+function TreasuryView({ accounts, transactions, staff, salaryPayments, chartOfAccounts, expenses, fixedAssets, accountingPeriods, bankReconciliations, dailyClosings, actions, askConfirm, isManager, can }) {
   const [tab, setTab] = useState('accounts');
   const canExpenses = isManager || (can && can('manage_expenses'));
   const canAssets = isManager || (can && can('manage_fixed_assets'));
   const canPeriods = isManager || (can && can('close_accounting_period'));
   const canReconcile = isManager || (can && can('perform_bank_reconciliation'));
+  const canDailyClose = isManager || (can && can('perform_daily_closing'));
   const TABS = [
     ['accounts', 'الحسابات'],
     ['payroll', 'الرواتب'],
     ...(canExpenses ? [['expenses', 'المصروفات']] : []),
     ...(canAssets ? [['assets', 'الأصول الثابتة']] : []),
     ...(canReconcile ? [['reconciliation', 'التسوية البنكية']] : []),
+    ...(canDailyClose ? [['daily-closing', 'الإقفال اليومي']] : []),
     ...(canPeriods ? [['periods', 'الفترات المحاسبية']] : []),
   ];
   return (
@@ -294,6 +341,7 @@ function TreasuryView({ accounts, transactions, staff, salaryPayments, chartOfAc
       {tab === 'expenses' && canExpenses && <ExpensesTab expenses={expenses} accounts={accounts} chartOfAccounts={chartOfAccounts} actions={actions} />}
       {tab === 'assets' && canAssets && <FixedAssetsTab fixedAssets={fixedAssets} accounts={accounts} chartOfAccounts={chartOfAccounts} actions={actions} askConfirm={askConfirm} />}
       {tab === 'reconciliation' && canReconcile && <ReconciliationTab accounts={accounts} transactions={transactions} bankReconciliations={bankReconciliations} actions={actions} askConfirm={askConfirm} />}
+      {tab === 'daily-closing' && canDailyClose && <DailyClosingTab accounts={accounts} transactions={transactions} dailyClosings={dailyClosings} actions={actions} askConfirm={askConfirm} />}
       {tab === 'periods' && canPeriods && <AccountingPeriodsTab accountingPeriods={accountingPeriods} actions={actions} askConfirm={askConfirm} isManager={isManager} />}
     </div>
   );
@@ -629,6 +677,101 @@ function ReconciliationTab({ accounts, transactions, bankReconciliations, action
                   <td className="px-4 py-3 font-mono" style={{ color: C.ink }}>{SAR(r.statement_balance)}</td>
                   <td className="px-4 py-3 font-mono" style={{ color: C.ink }}>{SAR(r.book_balance)}</td>
                   <td className="px-4 py-3 font-mono font-bold" style={{ color: Math.abs(r.difference) < 0.01 ? C.normal : C.critical }}>{SAR(r.difference)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// الإقفال اليومي: عدّ الصندوق الفعلي، مقارنته بما يتوقعه النظام، ثم ترحيل
+// المبلغ المعدود بالكامل للخزينة الرئيسية
+// ---------------------------------------------------------------------------
+function DailyClosingTab({ accounts, transactions, dailyClosings, actions, askConfirm }) {
+  const cashAccounts = accounts.filter((a) => a.type === 'نقدي');
+  const [accountId, setAccountId] = useState(cashAccounts[0]?.id || '');
+  const [treasuryAccountId, setTreasuryAccountId] = useState('');
+  const [counted, setCounted] = useState('');
+  const [notes, setNotes] = useState('');
+  const [error, setError] = useState('');
+
+  const expected = accountId ? accountBalance(accounts.find((a) => a.id === accountId), transactions) : 0;
+  const treasuryOptions = accounts.filter((a) => a.id !== accountId);
+  const history = dailyClosings.filter((c) => c.account_id === accountId).sort((a, b) => new Date(b.closed_at) - new Date(a.closed_at));
+
+  const submit = () => {
+    const countedNum = Number(counted);
+    if (isNaN(countedNum) || countedNum < 0) { setError('أدخل الرصيد المعدود فعلياً بالصندوق'); return; }
+    if (!treasuryAccountId) { setError('اختر حساب الخزينة اللي راح يستلم الترحيل'); return; }
+    setError('');
+    const variance = countedNum - expected;
+    const varianceMsg = Math.abs(variance) < 0.01
+      ? 'المبلغ المعدود يطابق المتوقع تماماً.'
+      : variance > 0
+        ? `فيه زيادة قدرها ${SAR(variance)} ستُسجَّل كإيراد آخر.`
+        : `فيه عجز قدره ${SAR(Math.abs(variance))} سيُسجَّل كمصروف عجز نقدي.`;
+    askConfirm({
+      title: 'تأكيد الإقفال اليومي والترحيل',
+      message: `المتوقع: ${SAR(expected)} — المعدود: ${SAR(countedNum)}. ${varianceMsg} سيتم ترحيل ${SAR(countedNum)} للخزينة. هذا الإجراء لا يمكن التراجع عنه.`,
+      danger: Math.abs(variance) > 0.01,
+      confirmLabel: 'تأكيد الإقفال',
+      onConfirm: async () => { await actions.closeDailyRegister(accountId, countedNum, treasuryAccountId, notes.trim() || null); setCounted(''); setNotes(''); },
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Field label="الصندوق المراد إقفاله">
+            <select value={accountId} onChange={(e) => { setAccountId(e.target.value); setCounted(''); }} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+              {cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </Field>
+          <Field label="ترحيل إلى (الخزينة)">
+            <select value={treasuryAccountId} onChange={(e) => setTreasuryAccountId(e.target.value)} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
+              <option value="">اختر...</option>
+              {treasuryOptions.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </Field>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <StatCard label="الرصيد المتوقَّع (حسب النظام)" value={SAR(expected)} />
+          <Field label="الرصيد المعدود فعلياً"><input type="number" min="0" value={counted} onChange={(e) => setCounted(e.target.value)} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+        </div>
+        {counted !== '' && !isNaN(Number(counted)) && Math.abs(Number(counted) - expected) > 0.01 && (
+          <div className="text-sm font-bold" style={{ color: Number(counted) > expected ? C.normal : C.critical }}>
+            {Number(counted) > expected ? '↑ زيادة' : '↓ عجز'}: {SAR(Math.abs(Number(counted) - expected))}
+          </div>
+        )}
+        <Field label="ملاحظات (اختياري)"><input value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+        <ErrorNote>{error}</ErrorNote>
+        <button onClick={submit} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>تأكيد الإقفال والترحيل</button>
+      </div>
+
+      {history.length > 0 && (
+        <div className="rounded-lg overflow-x-auto" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+          <div className="px-4 py-3 font-bold" style={{ color: C.ink, borderBottom: `1px solid ${C.line}` }}>سجل الإقفالات السابقة</div>
+          <table className="w-full text-sm">
+            <thead><tr style={{ borderBottom: `1px solid ${C.line}` }}>
+              <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>التاريخ</th>
+              <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المتوقَّع</th>
+              <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>المعدود</th>
+              <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>الفرق</th>
+              <th className="text-right px-4 py-3 font-bold" style={{ color: C.inkMuted }}>بواسطة</th>
+            </tr></thead>
+            <tbody>
+              {history.map((c) => (
+                <tr key={c.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                  <td className="px-4 py-3 font-mono text-xs" style={{ color: C.inkMuted }}>{fmtDateTime(c.closed_at)}</td>
+                  <td className="px-4 py-3 font-mono" style={{ color: C.ink }}>{SAR(c.system_expected)}</td>
+                  <td className="px-4 py-3 font-mono" style={{ color: C.ink }}>{SAR(c.counted_balance)}</td>
+                  <td className="px-4 py-3 font-mono font-bold" style={{ color: Math.abs(c.variance) < 0.01 ? C.normal : C.critical }}>{SAR(c.variance)}</td>
+                  <td className="px-4 py-3" style={{ color: C.inkMuted }}>{c.closed_by_name}</td>
                 </tr>
               ))}
             </tbody>
