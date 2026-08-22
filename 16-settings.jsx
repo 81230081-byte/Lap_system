@@ -1,15 +1,16 @@
 // الإعدادات: كتالوج الفحوصات، بيانات المختبر، إدارة الموظفين
 
 // ---------------------------------------------------------------------------
-function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, can }) {
+function TestsTab({ catalog, inventory, testConsumables, orders, actions, askConfirm, isManager, can }) {
   const canManage = isManager || (can && can('manage_catalog'));
-  const blank = { name: '', category: '', unit: '', min: '', max: '', price: '', differentForFemale: false, minF: '', maxF: '', criticalLow: '', criticalHigh: '', consumesItemId: '', consumesQty: '1', valueType: 'numeric', qualitativeAbnormal: '' };
+  const blank = { name: '', category: '', unit: '', min: '', max: '', price: '', differentForFemale: false, minF: '', maxF: '', criticalLow: '', criticalHigh: '', valueType: 'numeric', qualitativeAbnormal: '' };
   const existingCategories = [...new Set(catalog.map((c) => c.category || 'Other'))].sort();
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [consumablesForId, setConsumablesForId] = useState(null);
 
   const resetForm = () => { setForm(blank); setEditingId(null); setError(''); };
   const startEdit = (t) => {
@@ -21,7 +22,6 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, 
       maxF: t.max_female !== null && t.max_female !== undefined ? String(t.max_female) : '',
       criticalLow: t.critical_low !== null && t.critical_low !== undefined ? String(t.critical_low) : '',
       criticalHigh: t.critical_high !== null && t.critical_high !== undefined ? String(t.critical_high) : '',
-      consumesItemId: t.consumes_item_id || '', consumesQty: t.consumes_qty ? String(t.consumes_qty) : '1',
       valueType: t.value_type || 'numeric', qualitativeAbnormal: t.qualitative_abnormal_value || '',
     });
     setError('');
@@ -37,7 +37,6 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, 
       payload = {
         name: form.name.trim(), category: form.category.trim(), unit: '', min: 0, max: 0, price,
         min_female: null, max_female: null, critical_low: null, critical_high: null,
-        consumes_item_id: form.consumesItemId || null, consumes_qty: form.consumesItemId ? Number(form.consumesQty) || 1 : null,
         value_type: 'qualitative', qualitative_abnormal_value: form.qualitativeAbnormal || null,
       };
     } else {
@@ -49,8 +48,6 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, 
         max_female: form.differentForFemale ? Number(form.maxF || max) : null,
         critical_low: form.criticalLow !== '' ? Number(form.criticalLow) : null,
         critical_high: form.criticalHigh !== '' ? Number(form.criticalHigh) : null,
-        consumes_item_id: form.consumesItemId || null,
-        consumes_qty: form.consumesItemId ? Number(form.consumesQty) || 1 : null,
         value_type: 'numeric', qualitative_abnormal_value: null,
       };
     }
@@ -106,14 +103,8 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, 
           <Field label="الحد الحرج الأعلى (اختياري)"><input type="number" step="any" value={form.criticalHigh} onChange={(e) => setForm({ ...form, criticalHigh: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
         </div>
         </>)}
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="يستهلك من المخزون (اختياري)">
-            <select value={form.consumesItemId} onChange={(e) => setForm({ ...form, consumesItemId: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
-              <option value="">بدون</option>
-              {inventory.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-            </select>
-          </Field>
-          {form.consumesItemId && <Field label="الكمية المستهلكة لكل فحص"><input type="number" min="1" value={form.consumesQty} onChange={(e) => setForm({ ...form, consumesQty: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>}
+        <div className="text-xs px-3 py-2 rounded-md" style={{ background: C.accentSoft, color: C.accentDark }}>
+          💡 المواد المستهلكة من المخزون تُدار الآن من زر "المواد المستهلكة" بجدول الفحوصات أسفل (تدعم أكثر من مادة لكل فحص).
         </div>
         <ErrorNote>{error}</ErrorNote>
         <div className="flex gap-2">
@@ -148,8 +139,11 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, 
               return groupByCategory(filtered).map(([cat, tests]) => (
               <React.Fragment key={cat}>
                 <tr style={{ background: C.bg }}><td colSpan={4} className="px-4 py-2 text-xs font-bold" style={{ color: C.accentDark }}>{cat} <span style={{ color: C.inkMuted, fontWeight: 400 }}>({tests.length})</span></td></tr>
-                {tests.map((c) => (
-                  <tr key={c.id} style={{ borderBottom: `1px solid ${C.line}` }}>
+                {tests.map((c) => {
+                  const myConsumables = testConsumables.filter((tc) => tc.test_id === c.id);
+                  return (
+                  <React.Fragment key={c.id}>
+                  <tr style={{ borderBottom: `1px solid ${C.line}` }}>
                     <td className="px-4 py-3 font-bold whitespace-nowrap" style={{ color: C.ink }}>{c.name}</td>
                     <td className="px-4 py-3 font-mono text-xs whitespace-nowrap" style={{ color: C.inkMuted }}>
                       {c.value_type === 'qualitative'
@@ -157,9 +151,23 @@ function TestsTab({ catalog, inventory, orders, actions, askConfirm, isManager, 
                         : <><bdi dir="ltr">{c.min}–{c.max} {c.unit}</bdi>{c.min_female !== null && c.min_female !== undefined ? ' (حسب الجنس)' : ''}</>}
                     </td>
                     <td className="px-4 py-3 font-mono whitespace-nowrap" style={{ color: C.ink }}>{SAR(c.price)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap">{canManage && <div className="flex items-center gap-3"><button onClick={() => startEdit(c)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button><button onClick={() => onDelete(c)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button></div>}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="flex items-center gap-3">
+                        <button onClick={() => setConsumablesForId(consumablesForId === c.id ? null : c.id)} className="text-xs font-bold" style={{ color: C.accentDark }}>المواد المستهلكة {myConsumables.length > 0 && `(${myConsumables.length})`}</button>
+                        {canManage && <><button onClick={() => startEdit(c)} className="text-xs font-bold" style={{ color: C.accent }}>تعديل</button><button onClick={() => onDelete(c)} className="text-xs font-bold" style={{ color: C.critical }}>حذف</button></>}
+                      </div>
+                    </td>
                   </tr>
-                ))}
+                  {consumablesForId === c.id && (
+                    <tr style={{ background: C.bg }}>
+                      <td colSpan={4} className="px-4 py-3">
+                        <TestConsumablesPanel test={c} inventory={inventory} consumables={myConsumables} actions={actions} canManage={canManage} askConfirm={askConfirm} />
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
+                  );
+                })}
               </React.Fragment>
               ));
             })()}
@@ -409,7 +417,7 @@ function UsersPermissionsTab({ staff, permissions, actions, myId, askConfirm, pe
 // ---------------------------------------------------------------------------
 // Settings (tabbed: tests / lab info / users & permissions)
 // ---------------------------------------------------------------------------
-function SettingsView({ catalog, inventory, orders, actions, askConfirm, isManager, can, staff, permissions, permissionCatalog, myId, labSettings, currencies, exchangeRates }) {
+function SettingsView({ catalog, inventory, orders, actions, askConfirm, isManager, can, staff, permissions, permissionCatalog, myId, labSettings, currencies, exchangeRates, testConsumables }) {
   const [tab, setTab] = useState('tests');
   const canManageUsers = isManager || (can && can('manage_users'));
   const canManageCurrencies = isManager || (can && (can('manage_currencies') || can('manage_exchange_rates')));
@@ -429,7 +437,7 @@ function SettingsView({ catalog, inventory, orders, actions, askConfirm, isManag
           ))}
         </div>
       </div>
-      {tab === 'tests' && <TestsTab catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
+      {tab === 'tests' && <TestsTab catalog={catalog} inventory={inventory} testConsumables={testConsumables} orders={orders} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
       {tab === 'lab' && <LabInfoTab labSettings={labSettings} actions={actions} isManager={isManager} can={can} />}
       {tab === 'currencies' && canManageCurrencies && <CurrenciesTab currencies={currencies} exchangeRates={exchangeRates} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} />}
       {tab === 'staff' && canManageUsers && <UsersPermissionsTab staff={staff} permissions={permissions} actions={actions} myId={myId} askConfirm={askConfirm} permissionCatalog={permissionCatalog} />}
@@ -546,6 +554,70 @@ function CurrenciesTab({ currencies, exchangeRates, actions, askConfirm, isManag
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// المواد المستهلكة لكل فحص: عرض/إضافة/تعديل/حذف الربط مع المخزون (متعدد المواد)
+// ---------------------------------------------------------------------------
+function TestConsumablesPanel({ test, inventory, consumables, actions, canManage, askConfirm }) {
+  const [addingItemId, setAddingItemId] = useState('');
+  const [addingQty, setAddingQty] = useState('1');
+  const [error, setError] = useState('');
+  const linkedIds = new Set(consumables.map((c) => c.item_id));
+  const availableItems = inventory.filter((i) => !linkedIds.has(i.id));
+
+  const add = async () => {
+    if (!addingItemId) { setError('اختر صنفاً من المخزون'); return; }
+    const qty = Number(addingQty);
+    if (!qty || qty <= 0) { setError('الكمية يجب أن تكون أكبر من صفر'); return; }
+    setError('');
+    await actions.addTestConsumable(test.id, addingItemId, qty);
+    setAddingItemId(''); setAddingQty('1');
+  };
+
+  const remove = (c) => {
+    const item = inventory.find((i) => i.id === c.item_id);
+    askConfirm({ title: 'إزالة مادة مستهلكة', message: `هل تريد إزالة "${item?.name}" من قائمة مواد فحص "${test.name}"؟`, danger: true, onConfirm: () => actions.removeTestConsumable(c.id) });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="text-xs font-bold" style={{ color: C.inkMuted }}>المواد المستهلكة عند إجراء فحص "{test.name}" (تُخصَم تلقائياً من المخزون عند اعتماد النتيجة)</div>
+      {consumables.length === 0 && <EmptyState text="لا توجد مواد مرتبطة بهذا الفحص بعد" />}
+      {consumables.length > 0 && (
+        <div className="space-y-1.5">
+          {consumables.map((c) => {
+            const item = inventory.find((i) => i.id === c.item_id);
+            return (
+              <div key={c.id} className="flex items-center justify-between px-3 py-2 rounded-md text-sm" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+                <span style={{ color: C.ink }}>{item?.name || 'صنف محذوف'}</span>
+                <div className="flex items-center gap-3">
+                  {canManage
+                    ? <input type="number" min="0.01" step="0.01" value={c.qty} onChange={(e) => actions.updateTestConsumableQty(c.id, Number(e.target.value))} className="w-20 px-2 py-1 rounded-md text-sm font-mono" style={inputStyle} />
+                    : <span className="font-mono" style={{ color: C.inkMuted }}>{c.qty}</span>}
+                  <span className="text-xs" style={{ color: C.inkFaint }}>{item?.unit}</span>
+                  {canManage && <button onClick={() => remove(c)} className="text-xs font-bold" style={{ color: C.critical }}>إزالة</button>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {canManage && (
+        <div className="flex flex-wrap items-end gap-2 pt-2" style={{ borderTop: `1px solid ${C.line}` }}>
+          <Field label="إضافة مادة">
+            <select value={addingItemId} onChange={(e) => setAddingItemId(e.target.value)} className="px-3 py-2 rounded-md text-sm" style={{ ...inputStyle, minWidth: 200 }}>
+              <option value="">اختر صنفاً...</option>
+              {availableItems.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+            </select>
+          </Field>
+          <Field label="الكمية"><input type="number" min="0.01" step="0.01" value={addingQty} onChange={(e) => setAddingQty(e.target.value)} className="w-24 px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+          <button onClick={add} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>إضافة</button>
+        </div>
+      )}
+      <ErrorNote>{error}</ErrorNote>
     </div>
   );
 }
