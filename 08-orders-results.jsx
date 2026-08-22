@@ -16,6 +16,8 @@ function OrdersView({ patients, catalog, orders, inventory, accounts, actions, s
   const [paymentAccountId, setPaymentAccountId] = useState('');
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [testQuery, setTestQuery] = useState('');
+  const [testCategoryFilter, setTestCategoryFilter] = useState('all');
   const [busy, setBusy] = useState(false);
   const [rejectingOrder, setRejectingOrder] = useState(null);
   const [ackOrder, setAckOrder] = useState(null);
@@ -81,8 +83,26 @@ function OrdersView({ patients, catalog, orders, inventory, accounts, actions, s
             <datalist id="referring-doctors-list">{knownDoctors.map((d) => <option key={d} value={d} />)}</datalist>
           </Field>
           <div>
-            <div className="text-xs font-bold mb-2" style={{ color: C.inkMuted }}>الفحوصات المطلوبة</div>
-            {groupByCategory(catalog).map(([cat, tests]) => {
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+              <div className="text-xs font-bold" style={{ color: C.inkMuted }}>الفحوصات المطلوبة {selectedTests.length > 0 && <span style={{ color: C.accent }}>({selectedTests.length} محدَّد)</span>}</div>
+            </div>
+            <div className="flex gap-2 mb-2">
+              <input value={testQuery} onChange={(e) => setTestQuery(e.target.value)} placeholder="بحث باسم الفحص أو الكود..." className="flex-1 px-3 py-2 rounded-md text-sm" style={inputStyle} />
+              <select value={testCategoryFilter} onChange={(e) => setTestCategoryFilter(e.target.value)} className="px-3 py-2 rounded-md text-sm" style={{ ...inputStyle, maxWidth: 180 }}>
+                <option value="all">كل الأقسام</option>
+                {[...new Set(catalog.map((c) => c.category))].sort().map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+              </select>
+            </div>
+            <div className="overflow-y-auto pr-1" style={{ maxHeight: 340 }}>
+            {(() => {
+              const tq = testQuery.trim().toLowerCase();
+              const visibleCatalog = catalog.filter((c) => {
+                if (testCategoryFilter !== 'all' && c.category !== testCategoryFilter) return false;
+                if (!tq) return true;
+                return (c.name || '').toLowerCase().includes(tq) || (c.short_name || '').toLowerCase().includes(tq) || (c.code || '').toLowerCase().includes(tq);
+              });
+              if (visibleCatalog.length === 0) return <EmptyState text="لا توجد فحوصات مطابقة" />;
+              return groupByCategory(visibleCatalog).map(([cat, tests]) => {
               const catSelectedCount = tests.filter((c) => selectedTests.includes(c.id)).length;
               return (
                 <div key={cat} className="mb-3">
@@ -103,7 +123,9 @@ function OrdersView({ patients, catalog, orders, inventory, accounts, actions, s
                   </div>
                 </div>
               );
-            })}
+              });
+            })()}
+            </div>
           </div>
           {lowStockWarnings.length > 0 && <ErrorNote>تنبيه مخزون: {lowStockWarnings.map((w) => w.name).join('، ')} منخفض حالياً</ErrorNote>}
           <div className="space-y-2 pt-3" style={{ borderTop: `1px solid ${C.line}` }}>
