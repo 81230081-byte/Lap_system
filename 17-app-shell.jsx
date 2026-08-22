@@ -306,6 +306,22 @@ function AppShell({ session }) {
       await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل فحص', p_details: t.name });
       fetchCatalogOnly();
     },
+    addTestConsumable: async (testId, itemId, qty) => {
+      const { error } = await sb.from('test_consumables').insert({ test_id: testId, item_id: itemId, qty });
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll();
+    },
+    updateTestConsumableQty: async (id, qty) => {
+      if (!qty || qty <= 0) return;
+      const { error } = await sb.from('test_consumables').update({ qty }).eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll();
+    },
+    removeTestConsumable: async (id) => {
+      const { error } = await sb.from('test_consumables').delete().eq('id', id);
+      if (error) { notify('error', friendlyError(error)); throw error; }
+      fetchAll();
+    },
     deleteTest: async (id, name) => {
       const { error } = await sb.from('catalog_tests').delete().eq('id', id);
       if (error) { notify('error', friendlyError(error)); throw error; }
@@ -646,7 +662,7 @@ function AppShell({ session }) {
           {view === 'financial-reports' && (isManager || can('view_financial_reports')) && <FinancialReportsView accounts={accounts} transactions={transactions} invoices={invoices} purchases={purchases} orders={orders} referringDoctors={referringDoctors} commissionPayments={commissionPayments} patients={patients} suppliers={suppliers} chartOfAccounts={chartOfAccounts} journalLines={journalLines} catalog={catalog} staff={staff} testConsumables={testConsumables} inventory={inventory} actions={actions} />}
           {view === 'billing' && (isManager || can('view_invoices') || can('record_payments')) && <BillingView invoices={invoices} orders={orders} patients={patients} accounts={accounts} currencies={currencies} actions={actions} />}
           {view === 'audit' && (isManager || can('view_financial_reports') || can('view_audit_log')) && <AuditLogView auditLog={auditLog} />}
-          {view === 'settings' && <SettingsView catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} staff={staff} permissions={permissions} permissionCatalog={permissionCatalog} myId={session.user.id} labSettings={labSettings} currencies={currencies} exchangeRates={exchangeRates} />}
+          {view === 'settings' && <SettingsView catalog={catalog} inventory={inventory} orders={orders} actions={actions} askConfirm={askConfirm} isManager={isManager} can={can} staff={staff} permissions={permissions} permissionCatalog={permissionCatalog} myId={session.user.id} labSettings={labSettings} currencies={currencies} exchangeRates={exchangeRates} testConsumables={testConsumables} />}
         </main>
       </div>
       <ConfirmDialog state={confirmState} onCancel={closeConfirm} />
