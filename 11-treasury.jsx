@@ -213,7 +213,7 @@ function PayrollTab({ staff, accounts, salaryPayments, actions }) {
   const [editingSalaryId, setEditingSalaryId] = useState(null);
   const [salaryDraft, setSalaryDraft] = useState('');
   const [payingId, setPayingId] = useState(null);
-  const [payForm, setPayForm] = useState({ amount: '', accountId: '', period: '' });
+  const [payForm, setPayForm] = useState({ basicSalary: '', allowances: '0', deductions: '0', advances: '0', accountId: '', period: '' });
   const [error, setError] = useState('');
 
   const startEditSalary = (p) => { setEditingSalaryId(p.id); setSalaryDraft(p.base_salary != null ? String(p.base_salary) : ''); };
@@ -224,12 +224,15 @@ function PayrollTab({ staff, accounts, salaryPayments, actions }) {
     setEditingSalaryId(null); setError('');
   };
 
-  const openPay = (p) => { setPayingId(p.id); setPayForm({ amount: p.base_salary != null ? String(p.base_salary) : '', accountId: accounts[0]?.id || '', period: '' }); setError(''); };
+  const openPay = (p) => { setPayingId(p.id); setPayForm({ basicSalary: p.base_salary != null ? String(p.base_salary) : '', allowances: '0', deductions: '0', advances: '0', accountId: accounts[0]?.id || '', period: '' }); setError(''); };
+  const netPay = () => Number(payForm.basicSalary || 0) + Number(payForm.allowances || 0) - Number(payForm.deductions || 0) - Number(payForm.advances || 0);
   const submitPay = (p) => {
-    const amount = Number(payForm.amount);
-    if (isNaN(amount) || amount <= 0) { setError('أدخل مبلغاً صحيحاً'); return; }
+    const basic = Number(payForm.basicSalary);
+    if (isNaN(basic) || basic <= 0) { setError('أدخل الراتب الأساسي'); return; }
     if (!payForm.accountId) { setError('اختر الصندوق أو الحساب الذي سيُصرف منه'); return; }
-    actions.paySalary(p.id, p.display_name, amount, payForm.accountId, payForm.period.trim());
+    if (!payForm.period.trim()) { setError('أدخل فترة الراتب (مثال: 2026-08)'); return; }
+    if (netPay() <= 0) { setError('صافي الراتب يجب أن يكون أكبر من صفر بعد الخصومات'); return; }
+    actions.paySalary(p.id, p.display_name, basic, Number(payForm.allowances || 0), Number(payForm.deductions || 0), Number(payForm.advances || 0), payForm.accountId, payForm.period.trim());
     setPayingId(null); setError('');
   };
 
@@ -275,16 +278,21 @@ function PayrollTab({ staff, accounts, salaryPayments, actions }) {
         return (
           <div className="rounded-lg p-4 space-y-3" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
             <div className="font-bold text-sm" style={{ color: C.ink }}>صرف راتب — {p.display_name}</div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <Field label="المبلغ"><input type="number" min="0" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Field label="الراتب الأساسي"><input type="number" min="0" value={payForm.basicSalary} onChange={(e) => setPayForm({ ...payForm, basicSalary: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+              <Field label="البدلات"><input type="number" min="0" value={payForm.allowances} onChange={(e) => setPayForm({ ...payForm, allowances: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+              <Field label="الخصومات"><input type="number" min="0" value={payForm.deductions} onChange={(e) => setPayForm({ ...payForm, deductions: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
+              <Field label="خصم سلفة"><input type="number" min="0" value={payForm.advances} onChange={(e) => setPayForm({ ...payForm, advances: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm font-mono" style={inputStyle} /></Field>
               <Field label="يُصرف من">
                 <select value={payForm.accountId} onChange={(e) => setPayForm({ ...payForm, accountId: e.target.value })} className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle}>
                   <option value="">اختر...</option>
                   {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               </Field>
-              <Field label="الفترة (اختياري)"><input value={payForm.period} onChange={(e) => setPayForm({ ...payForm, period: e.target.value })} placeholder="مثال: يوليو 2026" className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
+              <Field label="الفترة"><input value={payForm.period} onChange={(e) => setPayForm({ ...payForm, period: e.target.value })} placeholder="مثال: 2026-08" className="w-full px-3 py-2 rounded-md text-sm" style={inputStyle} /></Field>
             </div>
+            <div className="text-sm font-bold px-3 py-2 rounded-md" style={{ background: C.accentSoft, color: C.accentDark }}>صافي الراتب المستحق: {SAR(netPay())}</div>
+            <ErrorNote>{error}</ErrorNote>
             <div className="flex gap-2">
               <button onClick={() => submitPay(p)} className="px-4 py-2 rounded-md text-sm font-bold" style={{ background: C.accent, color: '#fff' }}>تأكيد الصرف</button>
               <button onClick={() => setPayingId(null)} className="px-4 py-2 rounded-md text-sm font-bold" style={{ border: `1px solid ${C.line}`, color: C.inkMuted }}>إلغاء</button>
@@ -298,9 +306,16 @@ function PayrollTab({ staff, accounts, salaryPayments, actions }) {
         {recent.length === 0 ? <EmptyState text="لا توجد رواتب مصروفة بعد" /> : (
           <div className="space-y-2">
             {recent.map((s) => (
-              <div key={s.id} className="flex items-center justify-between text-sm" style={{ borderBottom: `1px solid ${C.line}`, paddingBottom: 6 }}>
-                <div><span className="font-bold" style={{ color: C.ink }}>{s.staff_name}</span>{s.period && <span className="text-xs" style={{ color: C.inkMuted }}> · {s.period}</span>}</div>
-                <div className="flex items-center gap-2"><span className="font-mono" style={{ color: C.critical }}>{SAR(s.amount)}</span><span className="text-xs font-mono" style={{ color: C.inkFaint }}>{fmtDate(s.created_at)}</span></div>
+              <div key={s.id} className="text-sm" style={{ borderBottom: `1px solid ${C.line}`, paddingBottom: 6 }}>
+                <div className="flex items-center justify-between">
+                  <div><span className="font-bold" style={{ color: C.ink }}>{s.staff_name}</span>{s.period && <span className="text-xs" style={{ color: C.inkMuted }}> · {s.period}</span>}</div>
+                  <div className="flex items-center gap-2"><span className="font-mono font-bold" style={{ color: C.critical }}>{SAR(s.amount)}</span><span className="text-xs font-mono" style={{ color: C.inkFaint }}>{fmtDate(s.created_at)}</span></div>
+                </div>
+                {(s.allowances > 0 || s.deductions > 0 || s.advances_deduction > 0) && (
+                  <div className="text-xs font-mono mt-0.5" style={{ color: C.inkMuted }}>
+                    أساسي {SAR(s.basic_salary)}{s.allowances > 0 && ` + بدلات ${SAR(s.allowances)}`}{s.deductions > 0 && ` - خصومات ${SAR(s.deductions)}`}{s.advances_deduction > 0 && ` - سلفة ${SAR(s.advances_deduction)}`}
+                  </div>
+                )}
               </div>
             ))}
           </div>
