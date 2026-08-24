@@ -524,8 +524,8 @@ function AppShell({ session }) {
       await sb.rpc('log_action', { p_user_name: displayName, p_action: 'تعديل الراتب الأساسي', p_details: name });
       fetchProfilesOnly();
     },
-    paySalary: async (profileId, staffName, amount, accountId, period) => {
-      const { error } = await sb.rpc('pay_salary', { p_profile_id: profileId, p_staff_name: staffName, p_amount: amount, p_account_id: accountId, p_period: period || null, p_user_name: displayName });
+    paySalary: async (profileId, staffName, basicSalary, allowances, deductions, advancesDeduction, accountId, period) => {
+      const { error } = await sb.rpc('pay_salary', { p_profile_id: profileId, p_staff_name: staffName, p_basic_salary: basicSalary, p_allowances: allowances, p_deductions: deductions, p_advances_deduction: advancesDeduction, p_account_id: accountId, p_period: period, p_user_name: displayName });
       if (error) { notify('error', friendlyError(error)); throw error; }
       fetchAll();
     },
